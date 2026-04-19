@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>Trip Hub</title>
+  <title>TripHub</title>
   <link rel="manifest" href="manifest.json"/>
   <meta name="theme-color" content="#0f0f1a"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -25,7 +25,7 @@
 <div id="screen-auth" class="screen hidden">
   <div class="auth-card">
     <div class="auth-logo">✈</div>
-    <h1 class="auth-title">Trip <span>Hub</span></h1>
+    <h1 class="auth-title">Trip<span>Hub</span></h1>
     <p class="auth-sub">Sign in to access your family trip hub</p>
     <button id="btn-google-signin" class="btn-google">
       <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
@@ -39,24 +39,31 @@
 <div id="screen-group" class="screen hidden">
   <div class="auth-card">
     <div class="auth-logo">🗺</div>
-    <h2 class="auth-title" style="font-size:24px">Your trip group</h2>
+    <h2 class="auth-title" style="font-size:24px">Trip<span>Hub</span></h2>
     <p class="auth-sub" id="group-welcome">Welcome!</p>
     <div class="group-tabs">
       <button class="group-tab active" data-gtab="create">Create trip</button>
       <button class="group-tab" data-gtab="join">Join trip</button>
     </div>
+
+    <!-- CREATE -->
     <div id="gtab-create" class="gtab-panel">
-      <div class="field"><label>Trip name</label><input id="g-trip-name" placeholder="e.g. Europe 2026"/></div>
-      <div class="field"><label>Trip password</label><input id="g-trip-password" type="password" placeholder="Share this with your group"/></div>
-      <p style="font-size:12px;color:var(--text3);margin-bottom:12px;text-align:left">Share both the trip name and password with family so they can join.</p>
+      <div class="field"><label>Trip name</label><input id="g-trip-name" placeholder="e.g. Europe 2026" autocomplete="off"/></div>
+      <div class="field"><label>Trip password</label><input id="g-trip-password" type="password" placeholder="Share this with your group" autocomplete="new-password"/></div>
+      <p style="font-size:12px;color:var(--text3);margin-bottom:12px;text-align:left">You'll get a shareable invite link after creating.</p>
       <button class="btn-add full" id="btn-create-group">Create trip</button>
     </div>
+
+    <!-- JOIN — pre-filled from URL or manual -->
     <div id="gtab-join" class="gtab-panel hidden">
-      <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Enter the exact trip name and password shared by the trip creator.</p>
-      <div class="field"><label>Trip name</label><input id="g-join-name" placeholder="e.g. Europe 2026"/></div>
-      <div class="field"><label>Trip password</label><input id="g-join-password" type="password" placeholder="Enter password"/></div>
+      <div id="join-prefill-banner" class="hidden" style="background:rgba(91,191,138,0.12);border:1px solid rgba(91,191,138,0.3);border-radius:var(--radius-sm);padding:10px 12px;font-size:13px;color:#5bbf8a;margin-bottom:14px">
+        ✅ Trip name filled from invite link — just enter the password.
+      </div>
+      <div class="field"><label>Trip name</label><input id="g-join-name" placeholder="e.g. Europe 2026" autocomplete="off"/></div>
+      <div class="field"><label>Trip password</label><input id="g-join-password" type="password" placeholder="Enter password" autocomplete="new-password"/></div>
       <button class="btn-add full" id="btn-join-group">Join trip</button>
     </div>
+
     <button class="btn-signout-small" id="btn-signout-group">Sign out</button>
   </div>
 </div>
@@ -65,7 +72,7 @@
 <div id="screen-app" class="screen hidden">
   <header class="header">
     <div class="header-left">
-      <h1 class="header-title" id="app-trip-name">Trip <span>✈</span></h1>
+      <h1 class="header-title" id="app-trip-name">Trip<span>Hub</span></h1>
       <p class="header-sub" id="app-trip-sub">Loading…</p>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
@@ -75,9 +82,9 @@
   </header>
 
   <div id="app-menu" class="app-menu hidden">
-    <div class="menu-item" id="menu-invite"><span>🔗</span> Invite others</div>
-    <div class="menu-item" id="menu-leave"><span>🚪</span> Leave trip</div>
-    <div class="menu-item" id="menu-signout"><span>👤</span> Sign out</div>
+    <div class="menu-item" id="menu-invite">🔗 Share invite link</div>
+    <div class="menu-item" id="menu-leave">🚪 Leave trip</div>
+    <div class="menu-item" id="menu-signout">👤 Sign out</div>
   </div>
 
   <!-- INVITE MODAL -->
@@ -87,9 +94,9 @@
         <h3>Invite to trip</h3>
         <button class="modal-close" id="close-invite">✕</button>
       </div>
-      <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Share this code with family. They sign in and enter this on the Join screen.</p>
-      <div class="invite-code-box" id="invite-code-display">——</div>
-      <button class="btn-add full" id="btn-copy-code">Copy code</button>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:14px">Share this link. When they open it, the trip name is pre-filled — they only need to enter the password.</p>
+      <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:10px 12px;font-size:12px;color:var(--accent);word-break:break-all;margin-bottom:14px" id="invite-link-display">—</div>
+      <button class="btn-add full" id="btn-copy-link">Copy link</button>
     </div>
   </div>
 
@@ -175,34 +182,43 @@
   </main>
 </div>
 
-<!-- BOOKING MODAL (add + edit) -->
+<!-- BOOKING MODAL -->
 <div id="modal-booking" class="modal-bg">
   <div class="modal">
     <div class="modal-header">
       <h3 id="modal-booking-title">Add booking</h3>
       <button class="modal-close" id="close-booking">✕</button>
     </div>
-    <div class="field"><label>Title</label><input id="b-title" placeholder="e.g. Berlin → Paris flight"/></div>
+    <!-- Step 1: type selector -->
+    <div class="field">
+      <label>Type</label>
+      <div class="type-selector" id="type-selector">
+        <button class="type-btn active" data-type="flight">✈<span>Flight</span></button>
+        <button class="type-btn" data-type="train">🚆<span>Train</span></button>
+        <button class="type-btn" data-type="hotel">🏨<span>Hotel</span></button>
+        <button class="type-btn" data-type="experience">🎭<span>Experience</span></button>
+      </div>
+    </div>
+    <!-- Common fields -->
+    <div class="field"><label>Title</label><input id="b-title" placeholder="e.g. Berlin → Paris"/></div>
     <div class="field"><label>Booking ref / PNR</label><input id="b-ref" placeholder="ABC123"/></div>
-    <div class="field"><label>Date</label><input id="b-date" type="date"/></div>
-    <div class="field"><label>Type</label>
-      <select id="b-type">
-        <option value="flight">✈ Flight</option>
-        <option value="train">🚆 Train</option>
-        <option value="hotel">🏨 Hotel / Airbnb</option>
-        <option value="experience">🎭 Experience</option>
-      </select>
+    <div class="bk-date-row">
+      <div class="field" style="flex:1"><label>Date</label><input id="b-date" type="date"/></div>
+      <div class="field" style="flex:1"><label>Time <span style="color:var(--text3);font-size:11px">optional</span></label><input id="b-time" type="time"/></div>
     </div>
-    <div class="field">
-      <label>Location / Address <span style="color:var(--text3);font-size:11px">(opens in Maps)</span></label>
-      <input id="b-location" placeholder="e.g. Charles de Gaulle Airport, Paris"/>
+    <!-- Flight / Train only -->
+    <div id="bk-route-fields">
+      <div class="field"><label id="b-from-label">From</label><input id="b-from" placeholder="e.g. Berlin Brandenburg Airport"/></div>
+      <div class="field"><label id="b-to-label">To</label><input id="b-to" placeholder="e.g. Charles de Gaulle, Paris"/></div>
     </div>
+    <!-- Hotel / Experience only -->
+    <div id="bk-location-field">
+      <div class="field"><label>Location <span style="color:var(--text3);font-size:11px">opens in Maps</span></label><input id="b-location" placeholder="e.g. Le Marais, Paris"/></div>
+    </div>
+    <!-- Attachment -->
     <div class="field">
-      <label>Attachment <span style="color:var(--text3);font-size:11px">(PDF or image, max 1MB)</span></label>
-      <label class="file-upload-label" id="b-file-label">
-        📎 Tap to attach file
-        <input type="file" id="b-file" accept="application/pdf,image/*" style="display:none"/>
-      </label>
+      <label>Attachment <span style="color:var(--text3);font-size:11px">PDF or image, max 1MB</span></label>
+      <label class="file-upload-label">📎 Tap to attach<input type="file" id="b-file" accept="application/pdf,image/*" style="display:none"/></label>
       <div id="b-file-preview" class="file-preview hidden"></div>
     </div>
     <div class="modal-footer">
@@ -215,72 +231,48 @@
 <!-- PACK MODAL -->
 <div id="modal-pack" class="modal-bg">
   <div class="modal">
-    <div class="modal-header">
-      <h3 id="modal-pack-title">Add item</h3>
-      <button class="modal-close" id="close-pack">✕</button>
-    </div>
+    <div class="modal-header"><h3 id="modal-pack-title">Add item</h3><button class="modal-close" id="close-pack">✕</button></div>
     <div class="field"><label>Item name</label><input id="p-label" placeholder="e.g. Sunscreen"/></div>
     <div class="field"><label>Category</label>
-      <select id="p-cat">
-        <option>Documents</option><option>Clothing</option>
-        <option>Electronics</option><option>Medicines</option><option>Misc</option>
-      </select>
+      <select id="p-cat"><option>Documents</option><option>Clothing</option><option>Electronics</option><option>Medicines</option><option>Misc</option></select>
     </div>
-    <div class="modal-footer">
-      <button class="btn-cancel" id="cancel-pack">Cancel</button>
-      <button class="btn-save" id="save-pack">Save</button>
-    </div>
+    <div class="modal-footer"><button class="btn-cancel" id="cancel-pack">Cancel</button><button class="btn-save" id="save-pack">Save</button></div>
   </div>
 </div>
 
 <!-- ACTIVITY MODAL -->
 <div id="modal-activity" class="modal-bg">
   <div class="modal">
-    <div class="modal-header">
-      <h3 id="modal-activity-title">Add activity</h3>
-      <button class="modal-close" id="close-activity">✕</button>
-    </div>
+    <div class="modal-header"><h3 id="modal-activity-title">Add activity</h3><button class="modal-close" id="close-activity">✕</button></div>
     <div class="field"><label>Activity name</label><input id="a-label" placeholder="e.g. Canal boat tour"/></div>
     <div class="field"><label>City</label><input id="a-city" placeholder="e.g. Amsterdam"/></div>
-    <div class="field"><label>Date</label><input id="a-date" type="date"/></div>
+    <div class="bk-date-row">
+      <div class="field" style="flex:1"><label>Date</label><input id="a-date" type="date"/></div>
+      <div class="field" style="flex:1"><label>Time <span style="color:var(--text3);font-size:11px">optional</span></label><input id="a-time" type="time"/></div>
+    </div>
     <div class="field"><label>Time slot</label>
       <select id="a-slot"><option>Morning</option><option>Afternoon</option><option>Evening</option></select>
     </div>
-    <div class="field">
-      <label>Location <span style="color:var(--text3);font-size:11px">(opens in Maps)</span></label>
-      <input id="a-location" placeholder="e.g. Keukenhof Gardens, Netherlands"/>
-    </div>
-    <div class="modal-footer">
-      <button class="btn-cancel" id="cancel-activity">Cancel</button>
-      <button class="btn-save" id="save-activity">Save</button>
-    </div>
+    <div class="field"><label>Location <span style="color:var(--text3);font-size:11px">opens in Maps</span></label><input id="a-location" placeholder="e.g. Keukenhof Gardens"/></div>
+    <div class="modal-footer"><button class="btn-cancel" id="cancel-activity">Cancel</button><button class="btn-save" id="save-activity">Save</button></div>
   </div>
 </div>
 
 <!-- EXPENSE MODAL -->
 <div id="modal-expense" class="modal-bg">
   <div class="modal">
-    <div class="modal-header">
-      <h3 id="modal-expense-title">Add expense</h3>
-      <button class="modal-close" id="close-expense">✕</button>
-    </div>
+    <div class="modal-header"><h3 id="modal-expense-title">Add expense</h3><button class="modal-close" id="close-expense">✕</button></div>
     <div class="field"><label>Description</label><input id="e-label" placeholder="e.g. Dinner canal side"/></div>
     <div class="field"><label>Amount (€)</label><input id="e-amount" type="number" placeholder="0"/></div>
     <div class="field"><label>City</label><input id="e-city" placeholder="e.g. Amsterdam"/></div>
     <div class="field"><label>Category</label>
-      <select id="e-cat">
-        <option>Transport</option><option>Hotels</option><option>Food</option>
-        <option>Experiences</option><option>Shopping</option><option>Other</option>
-      </select>
+      <select id="e-cat"><option>Transport</option><option>Hotels</option><option>Food</option><option>Experiences</option><option>Shopping</option><option>Other</option></select>
     </div>
-    <div class="modal-footer">
-      <button class="btn-cancel" id="cancel-expense">Cancel</button>
-      <button class="btn-save" id="save-expense">Save</button>
-    </div>
+    <div class="modal-footer"><button class="btn-cancel" id="cancel-expense">Cancel</button><button class="btn-save" id="save-expense">Save</button></div>
   </div>
 </div>
 
-<!-- DELETE CONFIRM MODAL -->
+<!-- DELETE CONFIRM -->
 <div id="modal-delete" class="modal-bg">
   <div class="modal" style="text-align:center">
     <div style="font-size:32px;margin-bottom:12px">🗑</div>
@@ -293,17 +285,12 @@
   </div>
 </div>
 
-<!-- PDF VIEWER MODAL -->
+<!-- PDF/IMAGE VIEWER -->
 <div id="modal-pdf" class="modal-bg">
   <div class="modal" style="max-height:90vh">
-    <div class="modal-header">
-      <h3 id="pdf-title">Attachment</h3>
-      <button class="modal-close" id="close-pdf">✕</button>
-    </div>
+    <div class="modal-header"><h3 id="pdf-title">Attachment</h3><button class="modal-close" id="close-pdf">✕</button></div>
     <div id="pdf-container" style="overflow-y:auto;max-height:60vh;border-radius:var(--radius-sm);background:var(--surface2)"></div>
-    <div class="modal-footer" style="margin-top:12px">
-      <button class="btn-save" id="btn-download-pdf">Download</button>
-    </div>
+    <div class="modal-footer" style="margin-top:12px"><button class="btn-save" id="btn-download-pdf">Download</button></div>
   </div>
 </div>
 
