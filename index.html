@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Europe Trip 2025</title>
+  <link rel="manifest" href="manifest.json"/>
+  <meta name="theme-color" content="#0f0f1a"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- ── LOADER ── -->
+<div id="loader" class="loader">
+  <div class="loader-inner">
+    <div class="loader-icon">✈</div>
+    <div class="loader-text">Loading…</div>
+  </div>
+</div>
+
+<!-- ── AUTH SCREEN ── -->
+<div id="screen-auth" class="screen hidden">
+  <div class="auth-card">
+    <div class="auth-logo">✈</div>
+    <h1 class="auth-title">Europe Trip <span>2025</span></h1>
+    <p class="auth-sub">Sign in to access your family trip hub</p>
+    <button id="btn-google-signin" class="btn-google">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+      Sign in with Google
+    </button>
+    <p class="auth-note">Your data is private — only visible to your trip group.</p>
+  </div>
+</div>
+
+<!-- ── GROUP SCREEN (create / join) ── -->
+<div id="screen-group" class="screen hidden">
+  <div class="auth-card">
+    <div class="auth-logo">🗺</div>
+    <h2 class="auth-title" style="font-size:24px">Your trip group</h2>
+    <p class="auth-sub" id="group-welcome">Welcome!</p>
+
+    <div class="group-tabs">
+      <button class="group-tab active" data-gtab="create">Create trip</button>
+      <button class="group-tab" data-gtab="join">Join trip</button>
+    </div>
+
+    <!-- CREATE -->
+    <div id="gtab-create" class="gtab-panel">
+      <div class="field">
+        <label>Trip name</label>
+        <input id="g-trip-name" placeholder="e.g. Europe 2025" />
+      </div>
+      <button class="btn-add full" id="btn-create-group">Create trip</button>
+    </div>
+
+    <!-- JOIN -->
+    <div id="gtab-join" class="gtab-panel hidden">
+      <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+        Ask the trip creator for the 6-character invite code.
+      </p>
+      <div class="field">
+        <label>Invite code</label>
+        <input id="g-invite-code" placeholder="e.g. AB12CD" maxlength="6" style="text-transform:uppercase;letter-spacing:0.15em;font-size:18px;text-align:center"/>
+      </div>
+      <button class="btn-add full" id="btn-join-group">Join trip</button>
+    </div>
+
+    <button class="btn-signout-small" id="btn-signout-group">Sign out</button>
+  </div>
+</div>
+
+<!-- ── MAIN APP ── -->
+<div id="screen-app" class="screen hidden">
+
+  <header class="header">
+    <div class="header-left">
+      <h1 class="header-title" id="app-trip-name">Europe <span>2025</span></h1>
+      <p class="header-sub" id="app-trip-sub">Loading…</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div id="app-avatars" class="traveler-avatars"></div>
+      <button class="avatar av-menu" id="btn-menu" title="Menu">⋮</button>
+    </div>
+  </header>
+
+  <!-- MENU DROPDOWN -->
+  <div id="app-menu" class="app-menu hidden">
+    <div class="menu-item" id="menu-invite">
+      <span>🔗</span> Invite others
+    </div>
+    <div class="menu-item" id="menu-leave">
+      <span>🚪</span> Leave trip
+    </div>
+    <div class="menu-item" id="menu-signout">
+      <span>👤</span> Sign out
+    </div>
+  </div>
+
+  <!-- INVITE MODAL -->
+  <div id="modal-invite" class="modal-bg">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Invite to trip</h3>
+        <button class="modal-close" id="close-invite">✕</button>
+      </div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Share this code with family members. They sign in and enter this code on the "Join trip" screen.</p>
+      <div class="invite-code-box" id="invite-code-display">——</div>
+      <button class="btn-add full" id="btn-copy-code">Copy code</button>
+    </div>
+  </div>
+
+  <nav class="tab-nav">
+    <button class="tab-btn active" data-tab="itinerary"><span class="tab-icon">🗺</span><span class="tab-lbl">Itinerary</span></button>
+    <button class="tab-btn" data-tab="progress"><span class="tab-icon">📊</span><span class="tab-lbl">Progress</span></button>
+    <button class="tab-btn" data-tab="packing"><span class="tab-icon">🎒</span><span class="tab-lbl">Packing</span></button>
+    <button class="tab-btn" data-tab="planner"><span class="tab-icon">📅</span><span class="tab-lbl">Planner</span></button>
+    <button class="tab-btn" data-tab="expenses"><span class="tab-icon">💶</span><span class="tab-lbl">Expenses</span></button>
+    <button class="tab-btn" data-tab="photos"><span class="tab-icon">📷</span><span class="tab-lbl">Photos</span></button>
+  </nav>
+
+  <main class="content">
+    <!-- ITINERARY -->
+    <section id="tab-itinerary" class="tab-section active">
+      <div class="section-head"><h2>All bookings</h2><button class="btn-add" id="btn-add-booking">+ Add</button></div>
+      <div class="filter-row" id="bk-filters">
+        <button class="chip active" data-filter="all">All</button>
+        <button class="chip" data-filter="flight">✈ Flights</button>
+        <button class="chip" data-filter="train">🚆 Trains</button>
+        <button class="chip" data-filter="hotel">🏨 Hotels</button>
+        <button class="chip" data-filter="experience">🎭 Exp</button>
+      </div>
+      <div id="bk-list" class="card-list"></div>
+    </section>
+
+    <!-- PROGRESS -->
+    <section id="tab-progress" class="tab-section">
+      <div class="section-head"><h2>Trip progress</h2></div>
+      <div class="progress-hero">
+        <div class="progress-pct" id="prog-pct">0%</div>
+        <div class="progress-label">of the trip complete</div>
+        <div class="progress-track"><div class="progress-fill" id="prog-bar"></div></div>
+        <div class="progress-sub"><span id="prog-done-lbl">0 done</span><span id="prog-left-lbl">0 remaining</span></div>
+      </div>
+      <div class="metric-grid" id="prog-metrics"></div>
+      <h3 class="subsection-title">Timeline</h3>
+      <div id="prog-timeline"></div>
+    </section>
+
+    <!-- PACKING -->
+    <section id="tab-packing" class="tab-section">
+      <div class="section-head"><h2>Packing list</h2><button class="btn-add" id="btn-add-pack">+ Item</button></div>
+      <div class="pack-progress-wrap">
+        <div class="pack-progress-row"><span>Packed</span><span id="pack-pct">0%</span></div>
+        <div class="progress-track"><div class="progress-fill" id="pack-bar"></div></div>
+      </div>
+      <div class="filter-row" id="pack-filters">
+        <button class="chip active" data-filter="all">All</button>
+        <button class="chip" data-filter="Documents">📄 Docs</button>
+        <button class="chip" data-filter="Clothing">👕 Clothes</button>
+        <button class="chip" data-filter="Electronics">🔌 Tech</button>
+        <button class="chip" data-filter="Medicines">💊 Med</button>
+        <button class="chip" data-filter="Misc">📦 Misc</button>
+      </div>
+      <div id="pack-list" class="check-list"></div>
+    </section>
+
+    <!-- PLANNER -->
+    <section id="tab-planner" class="tab-section">
+      <div class="section-head"><h2>Day planner</h2><button class="btn-add" id="btn-add-activity">+ Activity</button></div>
+      <div class="filter-row" id="city-pills"></div>
+      <div id="planner-list"></div>
+    </section>
+
+    <!-- EXPENSES -->
+    <section id="tab-expenses" class="tab-section">
+      <div class="metric-grid" id="exp-metrics" style="margin-bottom:20px"></div>
+      <div class="card"><h3 class="card-title">Spend by category</h3><div id="exp-chart"></div></div>
+      <div class="section-head" style="margin-top:20px"><h2>All expenses</h2><button class="btn-add" id="btn-add-expense">+ Add</button></div>
+      <div id="exp-list" class="card-list"></div>
+    </section>
+
+    <!-- PHOTOS -->
+    <section id="tab-photos" class="tab-section">
+      <div class="section-head">
+        <h2>Memories</h2>
+        <label class="btn-add" style="cursor:pointer">+ Photo<input type="file" accept="image/*" multiple id="photo-input" style="display:none"/></label>
+      </div>
+      <div id="no-photos" class="empty-state"><div class="empty-icon">📸</div><p>No photos yet — add some as you travel!</p></div>
+      <div id="photo-grid" class="photo-grid"></div>
+    </section>
+  </main>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

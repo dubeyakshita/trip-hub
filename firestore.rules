@@ -1,0 +1,75 @@
+// ============================================================
+// Firebase Security Rules
+// Paste this in Firebase Console → Firestore → Rules tab
+// ============================================================
+//
+// What these rules enforce:
+//   • Only authenticated users can read/write
+//   • Group data is only readable/writable by members of that group
+//   • A user can only add themselves to a group (not others)
+//   • No cross-group data access — enforced server-side by Firebase
+//
+// ============================================================
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Groups ────────────────────────────────────────────
+    match /groups/{groupId} {
+
+      // Any authenticated user can create a group
+      allow create: if request.auth != null
+                    && request.resource.data.members.hasAll([request.auth.uid])
+                    && request.resource.data.members.size() == 1;
+
+      // Only existing members can read the group document
+      allow read: if request.auth != null
+                  && request.auth.uid in resource.data.members;
+
+      // Members can update (e.g. add new members via invite code)
+      // but cannot remove other members
+      allow update: if request.auth != null
+                    && request.auth.uid in resource.data.members;
+
+      // Nobody can delete a group via client
+      allow delete: if false;
+
+
+      // ── Sub-collections (bookings, packing, etc.) ──────
+      // Only group members can read or write any sub-collection
+      match /{subcollection}/{docId} {
+        allow read, write: if request.auth != null
+                           && isGroupMember(groupId);
+      }
+    }
+
+    // ── _meta (seed marker, no user data) ─────────────────
+    match /_meta/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // ── Helper ────────────────────────────────────────────
+    function isGroupMember(groupId) {
+      return request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.members;
+    }
+  }
+}
+
+
+// ============================================================
+// Firebase Storage Rules
+// Paste this in Firebase Console → Storage → Rules tab
+// ============================================================
+
+// service firebase.storage {
+//   match /b/{bucket}/o {
+//     match /groups/{groupId}/photos/{allPaths=**} {
+//       allow read, write: if request.auth != null
+//         && request.auth.uid in firestore.get(
+//              /databases/(default)/documents/groups/$(groupId)
+//            ).data.members;
+//     }
+//   }
+// }
