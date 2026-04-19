@@ -101,10 +101,14 @@ el("btn-create-group").addEventListener("click", async () => {
   const name = el("g-trip-name").value.trim();
   if (!name) return alert("Please enter a trip name.");
   const inviteCode = randomCode();
+  // Create the group
   const gRef = await addDoc(collection(db,"groups"), {
     name, inviteCode, members:[currentUser.uid],
     createdBy:currentUser.uid, createdAt:serverTimestamp()
   });
+  // Write invite code index — lets join lookup work without exposing all groups
+  await setDoc(doc(db,"inviteCodes",inviteCode), { groupId:gRef.id });
+  // Save member profile
   await setDoc(doc(db,"groups",gRef.id,"memberProfiles",currentUser.uid), {
     uid:currentUser.uid, displayName:currentUser.displayName||currentUser.email,
     photoURL:currentUser.photoURL||"", joinedAt:serverTimestamp()
@@ -115,25 +119,27 @@ el("btn-create-group").addEventListener("click", async () => {
   launchApp();
 });
 
-// Join group
+// Join group — uses inviteCodes index, never queries across all groups
 el("btn-join-group").addEventListener("click", async () => {
   const code = el("g-invite-code").value.trim().toUpperCase();
   if (code.length !== 6) return alert("Enter a valid 6-character code.");
   try {
-    const q    = query(collection(db,"groups"), where("inviteCode","==",code));
-    const snap = await getDocs(q);
-    if (snap.empty) return alert("No trip found with that code.");
-    const gDoc  = snap.docs[0];
-    const gData = gDoc.data();
+    // Step 1: look up groupId from invite code index (no group data exposed)
+    const codeSnap = await getDoc(doc(db,"inviteCodes",code));
+    if (!codeSnap.exists()) return alert("No trip found with that code. Check with the trip creator.");
+    const groupId = codeSnap.data().groupId;
+    // Step 2: read group (update rule allows non-member to append themselves)
+    const gSnap = await getDoc(doc(db,"groups",groupId));
+    const gData = gSnap.data();
     if (!gData.members.includes(currentUser.uid)) {
-      await updateDoc(doc(db,"groups",gDoc.id), { members:[...gData.members, currentUser.uid] });
-      await setDoc(doc(db,"groups",gDoc.id,"memberProfiles",currentUser.uid), {
+      await updateDoc(doc(db,"groups",groupId), { members:[...gData.members, currentUser.uid] });
+      await setDoc(doc(db,"groups",groupId,"memberProfiles",currentUser.uid), {
         uid:currentUser.uid, displayName:currentUser.displayName||currentUser.email,
         photoURL:currentUser.photoURL||"", joinedAt:serverTimestamp()
       });
     }
-    localStorage.setItem("groupId_"+currentUser.uid, gDoc.id);
-    currentGroup = { id:gDoc.id, ...gData, members:[...gData.members, currentUser.uid] };
+    localStorage.setItem("groupId_"+currentUser.uid, groupId);
+    currentGroup = { id:groupId, ...gData, members:[...gData.members, currentUser.uid] };
     launchApp();
   } catch(e) { alert("Could not join: " + e.message); }
 });
