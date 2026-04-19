@@ -115,7 +115,6 @@ el("btn-create-group").addEventListener("click", async () => {
   });
   localStorage.setItem("groupId_"+currentUser.uid, gRef.id);
   currentGroup = { id:gRef.id, name, inviteCode, members:[currentUser.uid] };
-  await seedGroupData();
   launchApp();
 });
 
@@ -160,53 +159,6 @@ el("menu-leave").addEventListener("click", async () => {
   unsubs.forEach(u=>u()); unsubs=[]; currentGroup=null;
   showGroupScreen();
 });
-
-// ── Seed ──────────────────────────────────────────────────────
-async function seedGroupData() {
-  const bookings = [
-    {type:"flight",    title:"Bengaluru → Berlin (Parents)", ref:"BLR-TXL-001",  date:"2025-06-05", status:"upcoming", location:"Kempegowda International Airport, Bengaluru", attachment:null},
-    {type:"hotel",     title:"Hotel Charlottenburg Berlin",  ref:"HTLCBLN",       date:"2025-06-05", status:"upcoming", location:"Kantstraße 111, 10627 Berlin", attachment:null},
-    {type:"flight",    title:"Berlin → Paris",               ref:"BER-CDG-22",    date:"2025-06-08", status:"upcoming", location:"Berlin Brandenburg Airport", attachment:null},
-    {type:"train",     title:"Paris → Amsterdam",            ref:"THA-PA-55",     date:"2025-06-11", status:"upcoming", location:"Paris Gare du Nord", attachment:null},
-    {type:"hotel",     title:"Le Marais Airbnb Paris",       ref:"AIRBNB-PM3",    date:"2025-06-08", status:"upcoming", location:"Le Marais, Paris, France", attachment:null},
-    {type:"experience",title:"Eiffel Tower summit tickets",  ref:"ET-TOP-44",     date:"2025-06-09", status:"upcoming", location:"Eiffel Tower, Paris", attachment:null},
-    {type:"experience",title:"Louvre Museum entry",          ref:"LV-ENT-99",     date:"2025-06-10", status:"upcoming", location:"Musée du Louvre, Paris", attachment:null},
-    {type:"hotel",     title:"Hotel Canal Amsterdam",        ref:"HAMS22",        date:"2025-06-11", status:"upcoming", location:"Amsterdam, Netherlands", attachment:null},
-    {type:"experience",title:"Anne Frank House",             ref:"AFH-88",        date:"2025-06-12", status:"upcoming", location:"Anne Frank House, Amsterdam", attachment:null},
-    {type:"flight",    title:"Amsterdam → Bengaluru (Parents)",ref:"AMS-BLR-RET",date:"2025-06-15", status:"upcoming", location:"Amsterdam Airport Schiphol", attachment:null},
-  ];
-  const packing = [
-    {cat:"Documents",  label:"Passports (all 4)",            done:false},
-    {cat:"Documents",  label:"Schengen visas (parents)",     done:false},
-    {cat:"Documents",  label:"Travel insurance docs",        done:false},
-    {cat:"Documents",  label:"Hotel & flight printouts",     done:false},
-    {cat:"Electronics",label:"Universal adapter (India→EU)", done:false},
-    {cat:"Electronics",label:"Power bank",                   done:false},
-    {cat:"Clothing",   label:"Warm jacket (for parents)",    done:false},
-    {cat:"Clothing",   label:"Rain jacket or umbrella",      done:false},
-    {cat:"Medicines",  label:"Motion sickness tablets",      done:false},
-    {cat:"Medicines",  label:"Parents' regular medicines",   done:false},
-    {cat:"Misc",       label:"Indian snacks for the flight", done:false},
-  ];
-  const activities = [
-    {city:"Berlin",    date:"2025-06-06", slot:"Morning",   label:"Brandenburg Gate walk",   location:"Brandenburg Gate, Berlin"},
-    {city:"Berlin",    date:"2025-06-06", slot:"Afternoon", label:"East Side Gallery",        location:"East Side Gallery, Berlin"},
-    {city:"Paris",     date:"2025-06-09", slot:"Morning",   label:"Eiffel Tower summit",      location:"Eiffel Tower, Paris"},
-    {city:"Paris",     date:"2025-06-09", slot:"Afternoon", label:"Seine river cruise",       location:"Bateaux Parisiens, Paris"},
-    {city:"Amsterdam", date:"2025-06-12", slot:"Morning",   label:"Anne Frank House",         location:"Anne Frank House, Amsterdam"},
-    {city:"Amsterdam", date:"2025-06-13", slot:"Afternoon", label:"Canal boat tour",          location:"Amsterdam Centraal, Amsterdam"},
-  ];
-  const expenses = [
-    {cat:"Transport",   city:"Berlin", label:"Train BER-CDG",    amount:280},
-    {cat:"Hotels",      city:"Paris",  label:"Airbnb 3 nights",  amount:420},
-    {cat:"Food",        city:"Paris",  label:"Dinner Montmartre", amount:95},
-    {cat:"Experiences", city:"Paris",  label:"Eiffel Tower x4",  amount:120},
-  ];
-  for (const b of bookings)   await addDoc(groupCol("bookings"),   b);
-  for (const p of packing)    await addDoc(groupCol("packing"),    p);
-  for (const a of activities) await addDoc(groupCol("activities"), a);
-  for (const e of expenses)   await addDoc(groupCol("expenses"),   e);
-}
 
 // ── Launch ────────────────────────────────────────────────────
 function launchApp() {
