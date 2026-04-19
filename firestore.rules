@@ -1,33 +1,11 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // ── Invite code index ────────────────────────────────────
-    // A small separate collection: inviteCodes/{code} → { groupId }
-    // Anyone signed in can look up a code to find the groupId.
-    // They still cannot read the group document or any data without being a member.
-    match /inviteCodes/{code} {
-      allow read:   if request.auth != null;
-      allow create: if request.auth != null;
-      allow update, delete: if false;
-    }
-
-    // ── Groups ───────────────────────────────────────────────
     match /groups/{groupId} {
-
-      // Only members can read the group document itself
-      // (name, inviteCode, member list)
-      allow read: if request.auth != null
-                  && request.auth.uid in resource.data.members;
-
-      // Any signed-in user can create a group with only themselves as member
+      allow read: if request.auth != null;
       allow create: if request.auth != null
                     && request.resource.data.members.hasAll([request.auth.uid])
                     && request.resource.data.members.size() == 1;
-
-      // Members can make any update.
-      // Non-members can only append their own UID to members (join flow).
       allow update: if request.auth != null
                     && (
                       request.auth.uid in resource.data.members
@@ -35,28 +13,20 @@ service cloud.firestore {
                         request.resource.data.members.hasAll(resource.data.members)
                         && request.resource.data.members.size() == resource.data.members.size() + 1
                         && request.resource.data.members.hasAll([request.auth.uid])
-                        && request.resource.data.inviteCode == resource.data.inviteCode
+                        && request.resource.data.passwordHash == resource.data.passwordHash
                         && request.resource.data.name == resource.data.name
                         && request.resource.data.createdBy == resource.data.createdBy
                       )
                     );
-
       allow delete: if false;
-
-      // Sub-collections (bookings, packing, expenses, photos, etc.)
-      // Strictly members only — no exceptions
       match /{subcollection}/{docId} {
         allow read, write: if request.auth != null
                            && isGroupMember(groupId);
       }
     }
-
-    // ── Seed marker ──────────────────────────────────────────
     match /_meta/{docId} {
       allow read, write: if request.auth != null;
     }
-
-    // ── Helper ───────────────────────────────────────────────
     function isGroupMember(groupId) {
       return request.auth.uid in
         get(/databases/$(database)/documents/groups/$(groupId)).data.members;
