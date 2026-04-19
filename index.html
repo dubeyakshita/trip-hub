@@ -46,12 +46,15 @@
       <button class="group-tab" data-gtab="join">Join trip</button>
     </div>
     <div id="gtab-create" class="gtab-panel">
-      <div class="field"><label>Trip name</label><input id="g-trip-name" placeholder="e.g. Europe 2025"/></div>
+      <div class="field"><label>Trip name</label><input id="g-trip-name" placeholder="e.g. Europe 2026"/></div>
+      <div class="field"><label>Trip password</label><input id="g-trip-password" type="password" placeholder="Share this with your group"/></div>
+      <p style="font-size:12px;color:var(--text3);margin-bottom:12px;text-align:left">Share both the trip name and password with family so they can join.</p>
       <button class="btn-add full" id="btn-create-group">Create trip</button>
     </div>
     <div id="gtab-join" class="gtab-panel hidden">
-      <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Ask the trip creator for the 6-character invite code.</p>
-      <div class="field"><label>Invite code</label><input id="g-invite-code" placeholder="e.g. AB12CD" maxlength="6" style="text-transform:uppercase;letter-spacing:0.15em;font-size:18px;text-align:center"/></div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Enter the exact trip name and password shared by the trip creator.</p>
+      <div class="field"><label>Trip name</label><input id="g-join-name" placeholder="e.g. Europe 2026"/></div>
+      <div class="field"><label>Trip password</label><input id="g-join-password" type="password" placeholder="Enter password"/></div>
       <button class="btn-add full" id="btn-join-group">Join trip</button>
     </div>
     <button class="btn-signout-small" id="btn-signout-group">Sign out</button>
