@@ -3,21 +3,32 @@ import {
   signInWithPopup, signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
-  collection, doc, onSnapshot, addDoc, updateDoc, setDoc, getDoc, getDocs, query, where, serverTimestamp
+  collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc,
+  setDoc, getDoc, getDocs, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-// ── State ───────────────────────────────────────────────────
+// ── State ─────────────────────────────────────────────────────
 let currentUser  = null;
-let currentGroup = null;   // { id, name, inviteCode, members: [...uids] }
-let unsubs       = [];     // Firestore listener unsubscribers
-
+let currentGroup = null;
+let unsubs       = [];
 let state = { bookings:[], packing:[], activities:[], expenses:[], photos:[], members:[] };
 
 const BUDGET = 4000;
-let bkFilter   = "all";
-let packFilter = "all";
+let bkFilter    = "all";
+let packFilter  = "all";
 let currentCity = "";
-let currentModalType = "";
+
+// Delete confirm state
+let pendingDelete = null; // { col, id }
+
+// Edit state
+let editingBookingId   = null;
+let editingPackId      = null;
+let editingActivityId  = null;
+let editingExpenseId   = null;
+
+// Pending attachment for booking modal
+let pendingAttachment = null; // { name, type, data (base64) }
 
 const typeIcons = { flight:"✈", train:"🚆", hotel:"🏨", experience:"🎭" };
 const catColors = {
@@ -25,169 +36,138 @@ const catColors = {
   Experiences:"#e07ab0", Shopping:"#e8c97e", Other:"#9b97a8"
 };
 
-// ── Helpers ──────────────────────────────────────────────────
-function show(id)  { document.getElementById(id).classList.remove("hidden"); }
-function hide(id)  { document.getElementById(id).classList.add("hidden"); }
-function el(id)    { return document.getElementById(id); }
+// ── Helpers ───────────────────────────────────────────────────
+const el   = id => document.getElementById(id);
+const show = id => el(id).classList.remove("hidden");
+const hide = id => el(id).classList.add("hidden");
+const groupCol  = name     => collection(db, "groups", currentGroup.id, name);
+const groupDoc  = (name,id)=> doc(db, "groups", currentGroup.id, name, id);
 
-function groupCol(name) {
-  return collection(db, "groups", currentGroup.id, name);
+function randomCode(len=6) {
+  const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  return Array.from({length:len}, ()=>c[Math.floor(Math.random()*c.length)]).join("");
 }
-function groupDoc(name, id) {
-  return doc(db, "groups", currentGroup.id, name, id);
-}
-
-function randomCode(len = 6) {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  return Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
-}
-
 function initials(name) {
-  return (name || "?").split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+  return (name||"?").split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2);
 }
-
 const avatarColors = ["av-0","av-1","av-2","av-3","av-4","av-5"];
 
-// ── Auth flow ────────────────────────────────────────────────
+function mapsUrl(location) {
+  if (!location) return null;
+  return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(location);
+}
+
+function openModal(id)  { el(id).classList.add("open"); }
+function closeModal(id) { el(id).classList.remove("open"); }
+
+// ── Auth ──────────────────────────────────────────────────────
 onAuthStateChanged(auth, async user => {
   hide("loader");
-  if (!user) {
-    showAuthScreen();
-    return;
-  }
+  if (!user) { showAuthScreen(); return; }
   currentUser = user;
-  // Check if user belongs to a group
   const groupId = localStorage.getItem("groupId_" + user.uid);
   if (groupId) {
     const gSnap = await getDoc(doc(db, "groups", groupId));
     if (gSnap.exists() && gSnap.data().members.includes(user.uid)) {
       currentGroup = { id: gSnap.id, ...gSnap.data() };
-      launchApp();
-      return;
+      launchApp(); return;
     }
     localStorage.removeItem("groupId_" + user.uid);
   }
   showGroupScreen(user);
 });
 
-function showAuthScreen() {
-  hide("screen-app");
-  hide("screen-group");
-  show("screen-auth");
-}
+function showAuthScreen()  { hide("screen-app"); hide("screen-group"); show("screen-auth"); }
+function showGroupScreen() { hide("screen-auth"); hide("screen-app"); show("screen-group");
+  el("group-welcome").textContent = "Welcome, " + (currentUser.displayName || currentUser.email) + "!"; }
 
-function showGroupScreen(user) {
-  hide("screen-auth");
-  hide("screen-app");
-  show("screen-group");
-  el("group-welcome").textContent = "Welcome, " + (user.displayName || user.email) + "!";
-}
-
-// ── Google sign-in ───────────────────────────────────────────
 el("btn-google-signin").addEventListener("click", async () => {
-  try {
-    await signInWithPopup(auth, provider);
-    // onAuthStateChanged handles the rest
-  } catch (e) {
-    alert("Sign-in failed: " + e.message);
-  }
+  try { await signInWithPopup(auth, provider); }
+  catch(e) { alert("Sign-in failed: " + e.message); }
 });
 
-// ── Group tabs ───────────────────────────────────────────────
+// Group tabs
 document.querySelectorAll(".group-tab").forEach(btn => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".group-tab").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".group-tab").forEach(b=>b.classList.remove("active"));
     btn.classList.add("active");
     hide("gtab-create"); hide("gtab-join");
     show("gtab-" + btn.dataset.gtab);
   });
 });
 
-// ── Create trip group ────────────────────────────────────────
+// Create group
 el("btn-create-group").addEventListener("click", async () => {
   const name = el("g-trip-name").value.trim();
   if (!name) return alert("Please enter a trip name.");
   const inviteCode = randomCode();
-  const gRef = await addDoc(collection(db, "groups"), {
-    name,
-    inviteCode,
-    members: [currentUser.uid],
-    createdBy: currentUser.uid,
-    createdAt: serverTimestamp()
+  const gRef = await addDoc(collection(db,"groups"), {
+    name, inviteCode, members:[currentUser.uid],
+    createdBy:currentUser.uid, createdAt:serverTimestamp()
   });
-  // Save user profile in group
-  await setDoc(doc(db, "groups", gRef.id, "memberProfiles", currentUser.uid), {
-    uid:         currentUser.uid,
-    displayName: currentUser.displayName || currentUser.email,
-    photoURL:    currentUser.photoURL || "",
-    joinedAt:    serverTimestamp()
+  await setDoc(doc(db,"groups",gRef.id,"memberProfiles",currentUser.uid), {
+    uid:currentUser.uid, displayName:currentUser.displayName||currentUser.email,
+    photoURL:currentUser.photoURL||"", joinedAt:serverTimestamp()
   });
-  localStorage.setItem("groupId_" + currentUser.uid, gRef.id);
-  currentGroup = { id: gRef.id, name, inviteCode, members: [currentUser.uid] };
+  localStorage.setItem("groupId_"+currentUser.uid, gRef.id);
+  currentGroup = { id:gRef.id, name, inviteCode, members:[currentUser.uid] };
   await seedGroupData();
   launchApp();
 });
 
-// ── Join trip group ──────────────────────────────────────────
+// Join group
 el("btn-join-group").addEventListener("click", async () => {
   const code = el("g-invite-code").value.trim().toUpperCase();
   if (code.length !== 6) return alert("Enter a valid 6-character code.");
-  const q = query(collection(db, "groups"), where("inviteCode", "==", code));
-  const snap = await getDocs(q);
-  if (snap.empty) return alert("No trip found with that code. Check with the trip creator.");
-  const gDoc = snap.docs[0];
-  const gData = gDoc.data();
-  if (!gData.members.includes(currentUser.uid)) {
-    const newMembers = [...gData.members, currentUser.uid];
-    await updateDoc(doc(db, "groups", gDoc.id), { members: newMembers });
-    await setDoc(doc(db, "groups", gDoc.id, "memberProfiles", currentUser.uid), {
-      uid:         currentUser.uid,
-      displayName: currentUser.displayName || currentUser.email,
-      photoURL:    currentUser.photoURL || "",
-      joinedAt:    serverTimestamp()
-    });
-  }
-  localStorage.setItem("groupId_" + currentUser.uid, gDoc.id);
-  currentGroup = { id: gDoc.id, ...gData };
-  launchApp();
+  try {
+    const q    = query(collection(db,"groups"), where("inviteCode","==",code));
+    const snap = await getDocs(q);
+    if (snap.empty) return alert("No trip found with that code.");
+    const gDoc  = snap.docs[0];
+    const gData = gDoc.data();
+    if (!gData.members.includes(currentUser.uid)) {
+      await updateDoc(doc(db,"groups",gDoc.id), { members:[...gData.members, currentUser.uid] });
+      await setDoc(doc(db,"groups",gDoc.id,"memberProfiles",currentUser.uid), {
+        uid:currentUser.uid, displayName:currentUser.displayName||currentUser.email,
+        photoURL:currentUser.photoURL||"", joinedAt:serverTimestamp()
+      });
+    }
+    localStorage.setItem("groupId_"+currentUser.uid, gDoc.id);
+    currentGroup = { id:gDoc.id, ...gData, members:[...gData.members, currentUser.uid] };
+    launchApp();
+  } catch(e) { alert("Could not join: " + e.message); }
 });
 
-// ── Sign out ─────────────────────────────────────────────────
 async function doSignOut() {
-  unsubs.forEach(u => u());
-  unsubs = [];
-  currentGroup = null;
+  unsubs.forEach(u=>u()); unsubs=[]; currentGroup=null;
   await signOut(auth);
 }
 el("btn-signout-group").addEventListener("click", doSignOut);
 el("menu-signout").addEventListener("click", () => { hideMenu(); doSignOut(); });
 
-// ── Leave trip ───────────────────────────────────────────────
 el("menu-leave").addEventListener("click", async () => {
   hideMenu();
-  if (!confirm("Leave this trip? You can rejoin with the invite code.")) return;
-  localStorage.removeItem("groupId_" + currentUser.uid);
-  const newMembers = currentGroup.members.filter(m => m !== currentUser.uid);
-  await updateDoc(doc(db, "groups", currentGroup.id), { members: newMembers });
-  unsubs.forEach(u => u());
-  unsubs = [];
-  currentGroup = null;
-  showGroupScreen(currentUser);
+  if (!confirm("Leave this trip?")) return;
+  localStorage.removeItem("groupId_"+currentUser.uid);
+  const newM = currentGroup.members.filter(m=>m!==currentUser.uid);
+  await updateDoc(doc(db,"groups",currentGroup.id), { members:newM });
+  unsubs.forEach(u=>u()); unsubs=[]; currentGroup=null;
+  showGroupScreen();
 });
 
-// ── Seed initial data for a new group ───────────────────────
+// ── Seed ──────────────────────────────────────────────────────
 async function seedGroupData() {
   const bookings = [
-    {type:"flight",  title:"Bengaluru → Berlin (Parents)", ref:"BLR-TXL-001",  date:"2025-06-05", status:"upcoming"},
-    {type:"hotel",   title:"Hotel Charlottenburg Berlin",  ref:"HTLCBLN",       date:"2025-06-05", status:"upcoming"},
-    {type:"flight",  title:"Berlin → Paris",               ref:"BER-CDG-22",    date:"2025-06-08", status:"upcoming"},
-    {type:"train",   title:"Paris → Amsterdam",            ref:"THA-PA-55",     date:"2025-06-11", status:"upcoming"},
-    {type:"hotel",   title:"Le Marais Airbnb Paris",       ref:"AIRBNB-PM3",    date:"2025-06-08", status:"upcoming"},
-    {type:"experience",title:"Eiffel Tower summit tickets",ref:"ET-TOP-44",     date:"2025-06-09", status:"upcoming"},
-    {type:"experience",title:"Louvre Museum entry",        ref:"LV-ENT-99",     date:"2025-06-10", status:"upcoming"},
-    {type:"hotel",   title:"Hotel Canal Amsterdam",        ref:"HAMS22",        date:"2025-06-11", status:"upcoming"},
-    {type:"experience",title:"Anne Frank House",           ref:"AFH-88",        date:"2025-06-12", status:"upcoming"},
-    {type:"flight",  title:"Amsterdam → Bengaluru (Parents)",ref:"AMS-BLR-RET",date:"2025-06-15", status:"upcoming"},
+    {type:"flight",    title:"Bengaluru → Berlin (Parents)", ref:"BLR-TXL-001",  date:"2025-06-05", status:"upcoming", location:"Kempegowda International Airport, Bengaluru", attachment:null},
+    {type:"hotel",     title:"Hotel Charlottenburg Berlin",  ref:"HTLCBLN",       date:"2025-06-05", status:"upcoming", location:"Kantstraße 111, 10627 Berlin", attachment:null},
+    {type:"flight",    title:"Berlin → Paris",               ref:"BER-CDG-22",    date:"2025-06-08", status:"upcoming", location:"Berlin Brandenburg Airport", attachment:null},
+    {type:"train",     title:"Paris → Amsterdam",            ref:"THA-PA-55",     date:"2025-06-11", status:"upcoming", location:"Paris Gare du Nord", attachment:null},
+    {type:"hotel",     title:"Le Marais Airbnb Paris",       ref:"AIRBNB-PM3",    date:"2025-06-08", status:"upcoming", location:"Le Marais, Paris, France", attachment:null},
+    {type:"experience",title:"Eiffel Tower summit tickets",  ref:"ET-TOP-44",     date:"2025-06-09", status:"upcoming", location:"Eiffel Tower, Paris", attachment:null},
+    {type:"experience",title:"Louvre Museum entry",          ref:"LV-ENT-99",     date:"2025-06-10", status:"upcoming", location:"Musée du Louvre, Paris", attachment:null},
+    {type:"hotel",     title:"Hotel Canal Amsterdam",        ref:"HAMS22",        date:"2025-06-11", status:"upcoming", location:"Amsterdam, Netherlands", attachment:null},
+    {type:"experience",title:"Anne Frank House",             ref:"AFH-88",        date:"2025-06-12", status:"upcoming", location:"Anne Frank House, Amsterdam", attachment:null},
+    {type:"flight",    title:"Amsterdam → Bengaluru (Parents)",ref:"AMS-BLR-RET",date:"2025-06-15", status:"upcoming", location:"Amsterdam Airport Schiphol", attachment:null},
   ];
   const packing = [
     {cat:"Documents",  label:"Passports (all 4)",            done:false},
@@ -203,18 +183,18 @@ async function seedGroupData() {
     {cat:"Misc",       label:"Indian snacks for the flight", done:false},
   ];
   const activities = [
-    {city:"Berlin",    date:"2025-06-06", slot:"Morning",   label:"Brandenburg Gate walk"},
-    {city:"Berlin",    date:"2025-06-06", slot:"Afternoon", label:"East Side Gallery"},
-    {city:"Paris",     date:"2025-06-09", slot:"Morning",   label:"Eiffel Tower summit"},
-    {city:"Paris",     date:"2025-06-09", slot:"Afternoon", label:"Seine river cruise"},
-    {city:"Amsterdam", date:"2025-06-12", slot:"Morning",   label:"Anne Frank House"},
-    {city:"Amsterdam", date:"2025-06-13", slot:"Afternoon", label:"Canal boat tour"},
+    {city:"Berlin",    date:"2025-06-06", slot:"Morning",   label:"Brandenburg Gate walk",   location:"Brandenburg Gate, Berlin"},
+    {city:"Berlin",    date:"2025-06-06", slot:"Afternoon", label:"East Side Gallery",        location:"East Side Gallery, Berlin"},
+    {city:"Paris",     date:"2025-06-09", slot:"Morning",   label:"Eiffel Tower summit",      location:"Eiffel Tower, Paris"},
+    {city:"Paris",     date:"2025-06-09", slot:"Afternoon", label:"Seine river cruise",       location:"Bateaux Parisiens, Paris"},
+    {city:"Amsterdam", date:"2025-06-12", slot:"Morning",   label:"Anne Frank House",         location:"Anne Frank House, Amsterdam"},
+    {city:"Amsterdam", date:"2025-06-13", slot:"Afternoon", label:"Canal boat tour",          location:"Amsterdam Centraal, Amsterdam"},
   ];
   const expenses = [
-    {cat:"Transport",   city:"Berlin", label:"Train BER-CDG",   amount:280},
-    {cat:"Hotels",      city:"Paris",  label:"Airbnb 3 nights", amount:420},
-    {cat:"Food",        city:"Paris",  label:"Dinner Montmartre",amount:95},
-    {cat:"Experiences", city:"Paris",  label:"Eiffel Tower x4", amount:120},
+    {cat:"Transport",   city:"Berlin", label:"Train BER-CDG",    amount:280},
+    {cat:"Hotels",      city:"Paris",  label:"Airbnb 3 nights",  amount:420},
+    {cat:"Food",        city:"Paris",  label:"Dinner Montmartre", amount:95},
+    {cat:"Experiences", city:"Paris",  label:"Eiffel Tower x4",  amount:120},
   ];
   for (const b of bookings)   await addDoc(groupCol("bookings"),   b);
   for (const p of packing)    await addDoc(groupCol("packing"),    p);
@@ -222,376 +202,451 @@ async function seedGroupData() {
   for (const e of expenses)   await addDoc(groupCol("expenses"),   e);
 }
 
-// ── Launch main app ──────────────────────────────────────────
+// ── Launch ────────────────────────────────────────────────────
 function launchApp() {
-  hide("screen-auth");
-  hide("screen-group");
-  show("screen-app");
+  hide("screen-auth"); hide("screen-group"); show("screen-app");
   el("app-trip-name").innerHTML = currentGroup.name + ' <span>✈</span>';
   el("invite-code-display").textContent = currentGroup.inviteCode;
   subscribeAll();
 }
 
-// ── Firestore real-time listeners (group-scoped) ─────────────
+// ── Listeners ─────────────────────────────────────────────────
 function subscribeAll() {
-  unsubs.forEach(u => u());
-  unsubs = [];
-
+  unsubs.forEach(u=>u()); unsubs=[];
   unsubs.push(onSnapshot(groupCol("bookings"), snap => {
-    state.bookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    state.bookings.sort((a, b) => a.date.localeCompare(b.date));
+    state.bookings = snap.docs.map(d=>({id:d.id,...d.data()}));
+    state.bookings.sort((a,b)=>a.date.localeCompare(b.date));
     renderBookings(); renderProgress();
   }));
-
   unsubs.push(onSnapshot(groupCol("packing"), snap => {
-    state.packing = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    state.packing = snap.docs.map(d=>({id:d.id,...d.data()}));
     renderPacking();
   }));
-
   unsubs.push(onSnapshot(groupCol("activities"), snap => {
-    state.activities = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    state.activities = snap.docs.map(d=>({id:d.id,...d.data()}));
     renderPlanner();
   }));
-
   unsubs.push(onSnapshot(groupCol("expenses"), snap => {
-    state.expenses = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    state.expenses = snap.docs.map(d=>({id:d.id,...d.data()}));
     renderExpenses();
   }));
-
   unsubs.push(onSnapshot(groupCol("photos"), snap => {
-    state.photos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    state.photos = snap.docs.map(d=>({id:d.id,...d.data()}));
     renderPhotos();
   }));
-
   unsubs.push(onSnapshot(groupCol("memberProfiles"), snap => {
-    state.members = snap.docs.map(d => d.data());
+    state.members = snap.docs.map(d=>d.data());
     renderMembers();
   }));
 }
 
-// ── MENU ────────────────────────────────────────────────────
-el("btn-menu").addEventListener("click", e => {
-  e.stopPropagation();
-  el("app-menu").classList.toggle("hidden");
-});
-document.addEventListener("click", () => hideMenu());
+// ── Menu ──────────────────────────────────────────────────────
+el("btn-menu").addEventListener("click", e => { e.stopPropagation(); el("app-menu").classList.toggle("hidden"); });
+document.addEventListener("click", ()=>hideMenu());
 function hideMenu() { el("app-menu").classList.add("hidden"); }
 
-el("menu-invite").addEventListener("click", () => {
-  hideMenu();
-  el("modal-invite").classList.add("open");
-});
-el("close-invite").addEventListener("click", () => el("modal-invite").classList.remove("open"));
-el("btn-copy-code").addEventListener("click", () => {
-  navigator.clipboard.writeText(currentGroup.inviteCode).then(() => {
-    el("btn-copy-code").textContent = "Copied!";
-    setTimeout(() => { el("btn-copy-code").textContent = "Copy code"; }, 2000);
+el("menu-invite").addEventListener("click", ()=>{ hideMenu(); openModal("modal-invite"); });
+el("close-invite").addEventListener("click", ()=>closeModal("modal-invite"));
+el("modal-invite").addEventListener("click", e=>{ if(e.target===el("modal-invite")) closeModal("modal-invite"); });
+el("btn-copy-code").addEventListener("click", ()=>{
+  navigator.clipboard.writeText(currentGroup.inviteCode).then(()=>{
+    el("btn-copy-code").textContent="Copied!";
+    setTimeout(()=>{ el("btn-copy-code").textContent="Copy code"; }, 2000);
   });
 });
 
-// ── TAB NAV ──────────────────────────────────────────────────
+// ── Tab nav ───────────────────────────────────────────────────
 document.querySelectorAll(".tab-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
-    document.querySelectorAll(".tab-section").forEach(s => s.classList.remove("active"));
+  btn.addEventListener("click", ()=>{
+    document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
+    document.querySelectorAll(".tab-section").forEach(s=>s.classList.remove("active"));
     btn.classList.add("active");
-    el("tab-" + btn.dataset.tab).classList.add("active");
+    el("tab-"+btn.dataset.tab).classList.add("active");
   });
 });
 
-// ── RENDER: MEMBERS ─────────────────────────────────────────
-function renderMembers() {
-  const container = el("app-avatars");
-  container.innerHTML = state.members.slice(0, 5).map((m, i) => {
-    const init = initials(m.displayName);
-    return `<div class="avatar ${avatarColors[i % avatarColors.length]}" title="${m.displayName}">${init}</div>`;
-  }).join("");
-  const sub = state.members.length + " traveller" + (state.members.length !== 1 ? "s" : "");
-  el("app-trip-sub").textContent = sub;
+// ── Delete confirm ────────────────────────────────────────────
+function askDelete(col, id) {
+  pendingDelete = { col, id };
+  openModal("modal-delete");
+}
+el("cancel-delete").addEventListener("click", ()=>{ pendingDelete=null; closeModal("modal-delete"); });
+el("confirm-delete").addEventListener("click", async ()=>{
+  if (!pendingDelete) return;
+  await deleteDoc(groupDoc(pendingDelete.col, pendingDelete.id));
+  pendingDelete=null;
+  closeModal("modal-delete");
+});
+el("modal-delete").addEventListener("click", e=>{ if(e.target===el("modal-delete")){ pendingDelete=null; closeModal("modal-delete"); }});
+
+// ── Attachment handling ───────────────────────────────────────
+function fileToBase64(file) {
+  return new Promise((res,rej)=>{
+    if (file.size > 1.2*1024*1024) { rej(new Error("File is too large. Please keep attachments under 1 MB.")); return; }
+    const reader = new FileReader();
+    reader.onload  = ()=>res(reader.result);
+    reader.onerror = rej;
+    reader.readAsDataURL(file);
+  });
 }
 
-// ── RENDER: BOOKINGS ────────────────────────────────────────
+el("b-file").addEventListener("change", async function() {
+  const file = this.files[0];
+  if (!file) return;
+  try {
+    const data = await fileToBase64(file);
+    pendingAttachment = { name:file.name, type:file.type, data };
+    el("b-file-preview").classList.remove("hidden");
+    el("b-file-preview").innerHTML =
+      `<span>📎</span><span class="file-name">${file.name}</span><span class="file-clear" id="clear-file">✕</span>`;
+    el("clear-file").addEventListener("click", ()=>{
+      pendingAttachment=null;
+      el("b-file-preview").classList.add("hidden");
+      el("b-file-preview").innerHTML="";
+      el("b-file").value="";
+    });
+  } catch(e) { alert(e.message); this.value=""; }
+});
+
+// ── PDF viewer ────────────────────────────────────────────────
+function viewAttachment(attachment) {
+  el("pdf-title").textContent = attachment.name || "Attachment";
+  const container = el("pdf-container");
+  if (attachment.type === "application/pdf") {
+    container.innerHTML = `<iframe src="${attachment.data}" style="width:100%;height:55vh;border:none;border-radius:var(--radius-sm)"></iframe>`;
+  } else {
+    container.innerHTML = `<img src="${attachment.data}" style="width:100%;border-radius:var(--radius-sm)">`;
+  }
+  el("btn-download-pdf").onclick = ()=>{
+    const a = document.createElement("a");
+    a.href = attachment.data; a.download = attachment.name; a.click();
+  };
+  openModal("modal-pdf");
+}
+el("close-pdf").addEventListener("click", ()=>{ el("pdf-container").innerHTML=""; closeModal("modal-pdf"); });
+el("modal-pdf").addEventListener("click", e=>{ if(e.target===el("modal-pdf")){ el("pdf-container").innerHTML=""; closeModal("modal-pdf"); }});
+
+// ── BOOKINGS ──────────────────────────────────────────────────
 function renderBookings() {
   const list = el("bk-list");
-  const filtered = bkFilter === "all" ? state.bookings : state.bookings.filter(b => b.type === bkFilter);
-  if (!filtered.length) { list.innerHTML = '<div class="no-data">No bookings yet</div>'; return; }
-  list.innerHTML = filtered.map(b => `
-    <div class="bk-card ${b.type}">
-      <span class="bk-icon">${typeIcons[b.type] || "📌"}</span>
+  const filtered = bkFilter==="all" ? state.bookings : state.bookings.filter(b=>b.type===bkFilter);
+  if (!filtered.length) { list.innerHTML='<div class="no-data">No bookings yet</div>'; return; }
+  list.innerHTML = filtered.map(b => {
+    const locHtml = b.location
+      ? `<a class="location-link" href="${mapsUrl(b.location)}" target="_blank">📍 ${b.location}</a>` : "";
+    const attHtml = b.attachment
+      ? `<span class="attachment-btn" onclick="viewBkAttachment('${b.id}')">📎 ${b.attachment.name}</span>` : "";
+    return `<div class="bk-card ${b.type}">
+      <span class="bk-icon">${typeIcons[b.type]||"📌"}</span>
       <div class="bk-body">
         <div class="bk-title">${b.title}</div>
-        <div class="bk-meta">${b.date}</div>
-        <div class="bk-ref">${b.ref}</div>
+        <div class="bk-meta">${b.date} &nbsp;·&nbsp; <span style="font-family:monospace;font-size:11px">${b.ref}</span></div>
+        ${locHtml}${attHtml}
+        <div class="item-actions">
+          <button class="toggle-btn" onclick="cycleStatus('${b.id}','${b.status}')">${b.status} →</button>
+          <button class="btn-edit" onclick="editBooking('${b.id}')">Edit</button>
+          <button class="btn-delete" onclick="askDelete('bookings','${b.id}')">Delete</button>
+        </div>
       </div>
-      <div class="bk-right">
-        <span class="badge badge-${b.status}">${b.status}</span>
-        <button class="toggle-btn" onclick="cycleStatus('${b.id}','${b.status}')">toggle</button>
-      </div>
-    </div>`).join("");
+      <span class="badge badge-${b.status}">${b.status}</span>
+    </div>`;
+  }).join("");
 }
 
 window.cycleStatus = async function(id, status) {
-  const cycle = ["upcoming","today","done","cancelled"];
-  const next  = cycle[(cycle.indexOf(status) + 1) % cycle.length];
-  await updateDoc(groupDoc("bookings", id), { status: next });
+  const cycle=["upcoming","today","done","cancelled"];
+  await updateDoc(groupDoc("bookings",id), { status:cycle[(cycle.indexOf(status)+1)%cycle.length] });
+};
+window.askDelete = askDelete;
+window.viewBkAttachment = function(id) {
+  const b = state.bookings.find(x=>x.id===id);
+  if (b && b.attachment) viewAttachment(b.attachment);
 };
 
-document.querySelectorAll("#bk-filters .chip").forEach(btn => {
-  btn.addEventListener("click", () => {
-    bkFilter = btn.dataset.filter;
-    document.querySelectorAll("#bk-filters .chip").forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-    renderBookings();
+// Booking modal open/close
+function openBookingModal(bk=null) {
+  editingBookingId = bk ? bk.id : null;
+  pendingAttachment = bk && bk.attachment ? bk.attachment : null;
+  el("modal-booking-title").textContent = bk ? "Edit booking" : "Add booking";
+  el("b-title").value    = bk ? bk.title    : "";
+  el("b-ref").value      = bk ? bk.ref      : "";
+  el("b-date").value     = bk ? bk.date     : "";
+  el("b-type").value     = bk ? bk.type     : "flight";
+  el("b-location").value = bk ? (bk.location||"") : "";
+  el("b-file").value     = "";
+  if (pendingAttachment) {
+    el("b-file-preview").classList.remove("hidden");
+    el("b-file-preview").innerHTML = `<span>📎</span><span class="file-name">${pendingAttachment.name}</span><span class="file-clear" id="clear-file">✕</span>`;
+    el("clear-file").addEventListener("click", ()=>{
+      pendingAttachment=null; el("b-file-preview").classList.add("hidden"); el("b-file-preview").innerHTML=""; el("b-file").value="";
+    });
+  } else {
+    el("b-file-preview").classList.add("hidden"); el("b-file-preview").innerHTML="";
+  }
+  openModal("modal-booking");
+}
+window.editBooking = function(id) {
+  openBookingModal(state.bookings.find(b=>b.id===id));
+};
+el("btn-add-booking").addEventListener("click", ()=>openBookingModal());
+el("close-booking").addEventListener("click", ()=>closeModal("modal-booking"));
+el("cancel-booking").addEventListener("click", ()=>closeModal("modal-booking"));
+el("modal-booking").addEventListener("click", e=>{ if(e.target===el("modal-booking")) closeModal("modal-booking"); });
+
+el("save-booking").addEventListener("click", async ()=>{
+  const title = el("b-title").value.trim();
+  const date  = el("b-date").value;
+  if (!title||!date) return alert("Title and date are required.");
+  const data = {
+    type:el("b-type").value, title, ref:el("b-ref").value.trim()||"—",
+    date, location:el("b-location").value.trim()||"",
+    attachment: pendingAttachment || null,
+    addedBy:currentUser.uid
+  };
+  try {
+    if (editingBookingId) {
+      await updateDoc(groupDoc("bookings",editingBookingId), data);
+    } else {
+      data.status="upcoming";
+      await addDoc(groupCol("bookings"), data);
+    }
+    closeModal("modal-booking");
+  } catch(e) { alert("Error saving: "+e.message); }
+});
+
+document.querySelectorAll("#bk-filters .chip").forEach(btn=>{
+  btn.addEventListener("click",()=>{
+    bkFilter=btn.dataset.filter;
+    document.querySelectorAll("#bk-filters .chip").forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active"); renderBookings();
   });
 });
 
-// ── RENDER: PROGRESS ────────────────────────────────────────
+// ── PROGRESS ──────────────────────────────────────────────────
 function renderProgress() {
-  const total = state.bookings.length;
-  const done  = state.bookings.filter(b => b.status === "done").length;
-  const pct   = total ? Math.round(done / total * 100) : 0;
-  el("prog-pct").textContent  = pct + "%";
-  el("prog-bar").style.width  = pct + "%";
-  el("prog-done-lbl").textContent  = done + " done";
-  el("prog-left-lbl").textContent  = (total - done) + " remaining";
-
-  const types = ["flight","train","hotel","experience"];
-  el("prog-metrics").innerHTML = types.map(t => {
-    const all = state.bookings.filter(b => b.type === t);
-    const d   = all.filter(b => b.status === "done").length;
+  const total=state.bookings.length, done=state.bookings.filter(b=>b.status==="done").length;
+  const pct=total?Math.round(done/total*100):0;
+  el("prog-pct").textContent=pct+"%"; el("prog-bar").style.width=pct+"%";
+  el("prog-done-lbl").textContent=done+" done"; el("prog-left-lbl").textContent=(total-done)+" remaining";
+  const types=["flight","train","hotel","experience"];
+  el("prog-metrics").innerHTML=types.map(t=>{
+    const all=state.bookings.filter(b=>b.type===t), d=all.filter(b=>b.status==="done").length;
     return `<div class="metric"><div class="metric-val">${d}/${all.length}</div><div class="metric-lbl">${typeIcons[t]} ${t}s</div></div>`;
   }).join("");
-
-  el("prog-timeline").innerHTML = state.bookings.map(b => `
+  el("prog-timeline").innerHTML=state.bookings.map(b=>`
     <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
-      <span style="font-size:18px">${typeIcons[b.type] || "📌"}</span>
+      <span style="font-size:18px">${typeIcons[b.type]||"📌"}</span>
       <div style="flex:1;font-size:13px">${b.title}</div>
       <span style="font-size:12px;color:var(--text2)">${b.date}</span>
       <span class="badge badge-${b.status}">${b.status}</span>
     </div>`).join("");
 }
 
-// ── RENDER: PACKING ─────────────────────────────────────────
+// ── PACKING ───────────────────────────────────────────────────
 function renderPacking() {
-  const items = packFilter === "all" ? state.packing : state.packing.filter(p => p.cat === packFilter);
-  const done  = state.packing.filter(p => p.done).length;
-  const pct   = state.packing.length ? Math.round(done / state.packing.length * 100) : 0;
-  el("pack-pct").textContent = pct + "%";
-  el("pack-bar").style.width = pct + "%";
-  const list = el("pack-list");
-  if (!items.length) { list.innerHTML = '<div class="no-data">No items</div>'; return; }
-  list.innerHTML = items.map(p => `
+  const items=packFilter==="all"?state.packing:state.packing.filter(p=>p.cat===packFilter);
+  const done=state.packing.filter(p=>p.done).length;
+  const pct=state.packing.length?Math.round(done/state.packing.length*100):0;
+  el("pack-pct").textContent=pct+"%"; el("pack-bar").style.width=pct+"%";
+  const list=el("pack-list");
+  if (!items.length) { list.innerHTML='<div class="no-data">No items</div>'; return; }
+  list.innerHTML=items.map(p=>`
     <div class="check-item">
-      <input type="checkbox" id="pk${p.id}" ${p.done ? "checked" : ""} onchange="togglePack('${p.id}',${p.done})">
-      <label for="pk${p.id}" class="${p.done ? "done" : ""}">${p.label}</label>
+      <input type="checkbox" id="pk${p.id}" ${p.done?"checked":""} onchange="togglePack('${p.id}',${p.done})">
+      <label for="pk${p.id}" class="${p.done?"done":""}">${p.label}</label>
       <span class="item-cat">${p.cat}</span>
+      <div class="pack-item-actions">
+        <button class="btn-edit" onclick="editPack('${p.id}')">Edit</button>
+        <button class="btn-delete" onclick="askDelete('packing','${p.id}')">Del</button>
+      </div>
     </div>`).join("");
 }
+window.togglePack = async (id,current)=>{ await updateDoc(groupDoc("packing",id),{done:!current}); };
 
-window.togglePack = async function(id, current) {
-  await updateDoc(groupDoc("packing", id), { done: !current });
-};
+function openPackModal(p=null) {
+  editingPackId=p?p.id:null;
+  el("modal-pack-title").textContent=p?"Edit item":"Add item";
+  el("p-label").value=p?p.label:""; el("p-cat").value=p?p.cat:"Documents";
+  openModal("modal-pack");
+}
+window.editPack=id=>openPackModal(state.packing.find(p=>p.id===id));
+el("btn-add-pack").addEventListener("click",()=>openPackModal());
+el("close-pack").addEventListener("click",()=>closeModal("modal-pack"));
+el("cancel-pack").addEventListener("click",()=>closeModal("modal-pack"));
+el("modal-pack").addEventListener("click",e=>{ if(e.target===el("modal-pack")) closeModal("modal-pack"); });
+el("save-pack").addEventListener("click", async ()=>{
+  const label=el("p-label").value.trim();
+  if (!label) return alert("Item name required.");
+  const data={cat:el("p-cat").value, label, addedBy:currentUser.uid};
+  if (editingPackId) { await updateDoc(groupDoc("packing",editingPackId),data); }
+  else { data.done=false; await addDoc(groupCol("packing"),data); }
+  closeModal("modal-pack");
+});
 
-document.querySelectorAll("#pack-filters .chip").forEach(btn => {
-  btn.addEventListener("click", () => {
-    packFilter = btn.dataset.filter;
-    document.querySelectorAll("#pack-filters .chip").forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-    renderPacking();
+document.querySelectorAll("#pack-filters .chip").forEach(btn=>{
+  btn.addEventListener("click",()=>{
+    packFilter=btn.dataset.filter;
+    document.querySelectorAll("#pack-filters .chip").forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active"); renderPacking();
   });
 });
 
-// ── RENDER: PLANNER ─────────────────────────────────────────
+// ── PLANNER ───────────────────────────────────────────────────
 function renderPlanner() {
-  const cities = [...new Set(state.activities.map(a => a.city))].sort();
-  if (!currentCity && cities.length) currentCity = cities[0];
-  el("city-pills").innerHTML = cities.map(c =>
-    `<button class="city-pill ${c === currentCity ? "active" : ""}" onclick="selectCity('${c}')">${c}</button>`
+  const cities=[...new Set(state.activities.map(a=>a.city))].sort();
+  if (!currentCity&&cities.length) currentCity=cities[0];
+  el("city-pills").innerHTML=cities.map(c=>
+    `<button class="city-pill ${c===currentCity?"active":""}" onclick="selectCity('${c}')">${c}</button>`
   ).join("");
-
-  const byDate = {};
-  state.activities.filter(a => a.city === currentCity).forEach(a => {
-    if (!byDate[a.date]) byDate[a.date] = {};
-    if (!byDate[a.date][a.slot]) byDate[a.date][a.slot] = [];
+  const byDate={};
+  state.activities.filter(a=>a.city===currentCity).forEach(a=>{
+    if (!byDate[a.date]) byDate[a.date]={};
+    if (!byDate[a.date][a.slot]) byDate[a.date][a.slot]=[];
     byDate[a.date][a.slot].push(a);
   });
-
-  const listEl = el("planner-list");
-  if (!Object.keys(byDate).length) { listEl.innerHTML = '<div class="no-data">No activities for this city yet</div>'; return; }
-  listEl.innerHTML = Object.keys(byDate).sort().map(d => `
+  const listEl=el("planner-list");
+  if (!Object.keys(byDate).length) { listEl.innerHTML='<div class="no-data">No activities for this city yet</div>'; return; }
+  listEl.innerHTML=Object.keys(byDate).sort().map(d=>`
     <div class="day-card">
       <div class="day-title">${d}</div>
-      ${["Morning","Afternoon","Evening"].filter(s => byDate[d][s]).map(s => `
+      ${["Morning","Afternoon","Evening"].filter(s=>byDate[d][s]).map(s=>`
         <div class="slot-label">${s}</div>
-        ${byDate[d][s].map(a => `<div class="activity-item">${a.label}</div>`).join("")}
+        ${byDate[d][s].map(a=>`
+          <div class="activity-item">
+            ${a.label}
+            ${a.location?`<br><a class="location-link" href="${mapsUrl(a.location)}" target="_blank">📍 ${a.location}</a>`:""}
+            <div class="activity-actions">
+              <button class="btn-edit" onclick="editActivity('${a.id}')">Edit</button>
+              <button class="btn-delete" onclick="askDelete('activities','${a.id}')">Delete</button>
+            </div>
+          </div>`).join("")}
       `).join("")}
     </div>`).join("");
 }
+window.selectCity=c=>{ currentCity=c; renderPlanner(); };
 
-window.selectCity = function(c) { currentCity = c; renderPlanner(); };
+function openActivityModal(a=null) {
+  editingActivityId=a?a.id:null;
+  el("modal-activity-title").textContent=a?"Edit activity":"Add activity";
+  el("a-label").value=a?a.label:""; el("a-city").value=a?a.city:"";
+  el("a-date").value=a?a.date:""; el("a-slot").value=a?a.slot:"Morning";
+  el("a-location").value=a?(a.location||""):"";
+  openModal("modal-activity");
+}
+window.editActivity=id=>openActivityModal(state.activities.find(a=>a.id===id));
+el("btn-add-activity").addEventListener("click",()=>openActivityModal());
+el("close-activity").addEventListener("click",()=>closeModal("modal-activity"));
+el("cancel-activity").addEventListener("click",()=>closeModal("modal-activity"));
+el("modal-activity").addEventListener("click",e=>{ if(e.target===el("modal-activity")) closeModal("modal-activity"); });
+el("save-activity").addEventListener("click", async ()=>{
+  const label=el("a-label").value.trim(), city=el("a-city").value.trim(), date=el("a-date").value;
+  if (!label||!city||!date) return alert("All fields required.");
+  currentCity=city;
+  const data={city, date, slot:el("a-slot").value, label, location:el("a-location").value.trim()||"", addedBy:currentUser.uid};
+  if (editingActivityId) { await updateDoc(groupDoc("activities",editingActivityId),data); }
+  else { await addDoc(groupCol("activities"),data); }
+  closeModal("modal-activity");
+});
 
-// ── RENDER: EXPENSES ────────────────────────────────────────
+// ── EXPENSES ──────────────────────────────────────────────────
 function renderExpenses() {
-  const total = state.expenses.reduce((s, e) => s + (e.amount || 0), 0);
-  el("exp-metrics").innerHTML = `
+  const total=state.expenses.reduce((s,e)=>s+(e.amount||0),0);
+  el("exp-metrics").innerHTML=`
     <div class="metric"><div class="metric-val">€${total.toLocaleString()}</div><div class="metric-lbl">Total spent</div></div>
-    <div class="metric"><div class="metric-val">€${Math.round(total / (state.members.length || 4)).toLocaleString()}</div><div class="metric-lbl">Per person</div></div>
-    <div class="metric"><div class="metric-val">€${(BUDGET - total).toLocaleString()}</div><div class="metric-lbl">Budget left</div></div>
-    <div class="metric"><div class="metric-val">${Math.round(total / BUDGET * 100)}%</div><div class="metric-lbl">Of budget</div></div>
-  `;
-  const byCat = {};
-  state.expenses.forEach(e => { byCat[e.cat] = (byCat[e.cat] || 0) + (e.amount || 0); });
-  const maxVal = Math.max(...Object.values(byCat), 1);
-  el("exp-chart").innerHTML = Object.entries(byCat).map(([cat, amt]) => `
+    <div class="metric"><div class="metric-val">€${Math.round(total/(state.members.length||4)).toLocaleString()}</div><div class="metric-lbl">Per person</div></div>
+    <div class="metric"><div class="metric-val">€${(BUDGET-total).toLocaleString()}</div><div class="metric-lbl">Budget left</div></div>
+    <div class="metric"><div class="metric-val">${Math.round(total/BUDGET*100)}%</div><div class="metric-lbl">Of budget</div></div>`;
+  const byCat={};
+  state.expenses.forEach(e=>{ byCat[e.cat]=(byCat[e.cat]||0)+(e.amount||0); });
+  const maxVal=Math.max(...Object.values(byCat),1);
+  el("exp-chart").innerHTML=Object.entries(byCat).map(([cat,amt])=>`
     <div class="cat-bar-row">
       <span class="cat-bar-label">${cat}</span>
       <div class="cat-bar-track"><div class="cat-bar-fill" style="width:${Math.round(amt/maxVal*100)}%;background:${catColors[cat]||"#888"}"></div></div>
       <span class="cat-bar-amt">€${amt}</span>
-    </div>`).join("") || '<div class="no-data" style="padding:8px 0">No expenses yet</div>';
-
-  el("exp-list").innerHTML = state.expenses.length ? state.expenses.map(e => `
+    </div>`).join("")||'<div class="no-data" style="padding:8px 0">No expenses yet</div>';
+  el("exp-list").innerHTML=state.expenses.length?state.expenses.map(e=>`
     <div class="expense-row">
       <div><div class="exp-label">${e.label}</div><div class="exp-meta">${e.cat} · ${e.city}</div></div>
-      <div class="exp-amt">€${e.amount}</div>
-    </div>`).join("") : '<div class="no-data">No expenses yet</div>';
+      <div class="exp-actions">
+        <div class="exp-amt">€${e.amount}</div>
+        <div style="display:flex;gap:4px">
+          <button class="btn-edit" onclick="editExpense('${e.id}')">Edit</button>
+          <button class="btn-delete" onclick="askDelete('expenses','${e.id}')">Del</button>
+        </div>
+      </div>
+    </div>`).join(""):'<div class="no-data">No expenses yet</div>';
 }
 
-// ── RENDER: PHOTOS ──────────────────────────────────────────
+function openExpenseModal(e=null) {
+  editingExpenseId=e?e.id:null;
+  el("modal-expense-title").textContent=e?"Edit expense":"Add expense";
+  el("e-label").value=e?e.label:""; el("e-amount").value=e?e.amount:"";
+  el("e-city").value=e?e.city:""; el("e-cat").value=e?e.cat:"Transport";
+  openModal("modal-expense");
+}
+window.editExpense=id=>openExpenseModal(state.expenses.find(e=>e.id===id));
+el("btn-add-expense").addEventListener("click",()=>openExpenseModal());
+el("close-expense").addEventListener("click",()=>closeModal("modal-expense"));
+el("cancel-expense").addEventListener("click",()=>closeModal("modal-expense"));
+el("modal-expense").addEventListener("click",e=>{ if(e.target===el("modal-expense")) closeModal("modal-expense"); });
+el("save-expense").addEventListener("click", async ()=>{
+  const label=el("e-label").value.trim(), amount=el("e-amount").value;
+  if (!label||!amount) return alert("Description and amount required.");
+  const data={cat:el("e-cat").value, city:el("e-city").value.trim()||"—", label, amount:parseFloat(amount), addedBy:currentUser.uid};
+  if (editingExpenseId) { await updateDoc(groupDoc("expenses",editingExpenseId),data); }
+  else { await addDoc(groupCol("expenses"),data); }
+  closeModal("modal-expense");
+});
+
+// ── MEMBERS ───────────────────────────────────────────────────
+function renderMembers() {
+  el("app-avatars").innerHTML=state.members.slice(0,5).map((m,i)=>
+    `<div class="avatar ${avatarColors[i%avatarColors.length]}" title="${m.displayName}">${initials(m.displayName)}</div>`
+  ).join("");
+  el("app-trip-sub").textContent=state.members.length+" traveller"+(state.members.length!==1?"s":"");
+}
+
+// ── PHOTOS ────────────────────────────────────────────────────
 function renderPhotos() {
-  const grid = el("photo-grid");
-  const noP  = el("no-photos");
-  if (!state.photos.length) { grid.innerHTML = ""; noP.style.display = "block"; return; }
-  noP.style.display = "none";
-  grid.innerHTML = state.photos.map(p => `
-    <div class="photo-thumb"><img src="${p.url}" alt="${p.label}" loading="lazy"></div>`).join("");
+  const grid=el("photo-grid"), noP=el("no-photos");
+  if (!state.photos.length) { grid.innerHTML=""; noP.style.display="block"; return; }
+  noP.style.display="none";
+  grid.innerHTML=state.photos.map(p=>`
+    <div style="position:relative">
+      <div class="photo-thumb" onclick="viewPhoto('${p.id}')"><img src="${p.url}" alt="${p.label}" loading="lazy"></div>
+      <button onclick="askDelete('photos','${p.id}')" style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:50%;width:22px;height:22px;font-size:11px;cursor:pointer">✕</button>
+    </div>`).join("");
 }
+window.viewPhoto=function(id) {
+  const p=state.photos.find(x=>x.id===id); if(!p) return;
+  viewAttachment({name:p.label, type:"image/jpeg", data:p.url});
+};
 
-// Compress image to base64 — keeps each photo under ~100KB so Firestore is happy
-function compressToBase64(file, maxWidth = 800, quality = 0.7) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
+function compressToBase64(file, maxWidth=800, quality=0.7) {
+  return new Promise((res,rej)=>{
+    const img=new Image(), url=URL.createObjectURL(file);
+    img.onload=()=>{
       URL.revokeObjectURL(url);
-      const scale  = Math.min(1, maxWidth / img.width);
-      const canvas = document.createElement("canvas");
-      canvas.width  = Math.round(img.width  * scale);
-      canvas.height = Math.round(img.height * scale);
-      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL("image/jpeg", quality));
+      const scale=Math.min(1,maxWidth/img.width);
+      const canvas=document.createElement("canvas");
+      canvas.width=Math.round(img.width*scale); canvas.height=Math.round(img.height*scale);
+      canvas.getContext("2d").drawImage(img,0,0,canvas.width,canvas.height);
+      res(canvas.toDataURL("image/jpeg",quality));
     };
-    img.onerror = reject;
-    img.src = url;
+    img.onerror=rej; img.src=url;
   });
 }
 
 el("photo-input").addEventListener("change", async function() {
-  const btn = document.querySelector("label.btn-add");
-  const origText = btn ? btn.childNodes[0].textContent : "";
+  const label=document.querySelector("label.photo-label");
+  if (label) label.childNodes[0].textContent="Saving…";
   for (const file of this.files) {
     try {
-      if (btn) btn.childNodes[0].textContent = "Saving…";
-      const base64 = await compressToBase64(file);
-      await addDoc(groupCol("photos"), {
-        url:        base64,
-        label:      file.name.replace(/\.[^.]+$/, ""),
-        uploadedBy: currentUser.uid,
-        at:         serverTimestamp()
-      });
-    } catch (e) {
-      alert("Could not save photo: " + e.message);
-    }
+      const base64=await compressToBase64(file);
+      await addDoc(groupCol("photos"),{url:base64, label:file.name.replace(/\.[^.]+$/,""), uploadedBy:currentUser.uid, at:serverTimestamp()});
+    } catch(e) { alert("Could not save photo: "+e.message); }
   }
-  if (btn) btn.childNodes[0].textContent = origText;
-  this.value = "";
+  if (label) label.childNodes[0].textContent="+ Photo";
+  this.value="";
 });
-
-// ── MODAL ───────────────────────────────────────────────────
-const modalBg = el("modal-bg");
-const modalBodies = {
-  booking: `
-    <div class="field"><label>Title</label><input id="m-title" placeholder="e.g. Paris → Rome flight"/></div>
-    <div class="field"><label>Booking ref / PNR</label><input id="m-ref" placeholder="ABC123"/></div>
-    <div class="field"><label>Date</label><input id="m-date" type="date"/></div>
-    <div class="field"><label>Type</label><select id="m-type">
-      <option value="flight">✈ Flight</option>
-      <option value="train">🚆 Train</option>
-      <option value="hotel">🏨 Hotel / Airbnb</option>
-      <option value="experience">🎭 Experience</option>
-    </select></div>`,
-  pack: `
-    <div class="field"><label>Item name</label><input id="m-label" placeholder="e.g. Sunscreen"/></div>
-    <div class="field"><label>Category</label><select id="m-cat">
-      <option>Documents</option><option>Clothing</option>
-      <option>Electronics</option><option>Medicines</option><option>Misc</option>
-    </select></div>`,
-  activity: `
-    <div class="field"><label>Activity name</label><input id="m-label" placeholder="e.g. Canal boat tour"/></div>
-    <div class="field"><label>City</label><input id="m-city" placeholder="e.g. Amsterdam"/></div>
-    <div class="field"><label>Date</label><input id="m-date" type="date"/></div>
-    <div class="field"><label>Time slot</label><select id="m-slot">
-      <option>Morning</option><option>Afternoon</option><option>Evening</option>
-    </select></div>`,
-  expense: `
-    <div class="field"><label>Description</label><input id="m-label" placeholder="e.g. Dinner canal side"/></div>
-    <div class="field"><label>Amount (€)</label><input id="m-amount" type="number" placeholder="0"/></div>
-    <div class="field"><label>City</label><input id="m-city" placeholder="e.g. Amsterdam"/></div>
-    <div class="field"><label>Category</label><select id="m-cat">
-      <option>Transport</option><option>Hotels</option><option>Food</option>
-      <option>Experiences</option><option>Shopping</option><option>Other</option>
-    </select></div>`
-};
-const modalTitles = { booking:"Add booking", pack:"Add packing item", activity:"Add activity", expense:"Add expense" };
-
-function openModal(type) {
-  currentModalType = type;
-  el("modal-title").textContent = modalTitles[type];
-  el("modal-body").innerHTML = modalBodies[type];
-  modalBg.classList.add("open");
-}
-function closeModal() { modalBg.classList.remove("open"); }
-
-el("modal-close").addEventListener("click", closeModal);
-el("btn-cancel").addEventListener("click", closeModal);
-modalBg.addEventListener("click", e => { if (e.target === modalBg) closeModal(); });
-
-el("btn-save").addEventListener("click", async () => {
-  const g = id => { const x = document.getElementById(id); return x ? x.value.trim() : ""; };
-  try {
-    if (currentModalType === "booking") {
-      if (!g("m-title") || !g("m-date")) return alert("Title and date are required.");
-      await addDoc(groupCol("bookings"), {
-        type: g("m-type"), title: g("m-title"), ref: g("m-ref") || "—",
-        date: g("m-date"), status: "upcoming", addedBy: currentUser.uid
-      });
-    } else if (currentModalType === "pack") {
-      if (!g("m-label")) return alert("Item name required.");
-      await addDoc(groupCol("packing"), { cat: g("m-cat"), label: g("m-label"), done: false, addedBy: currentUser.uid });
-    } else if (currentModalType === "activity") {
-      if (!g("m-label") || !g("m-city") || !g("m-date")) return alert("All fields required.");
-      currentCity = g("m-city");
-      await addDoc(groupCol("activities"), {
-        city: g("m-city"), date: g("m-date"), slot: g("m-slot"), label: g("m-label"), addedBy: currentUser.uid
-      });
-    } else if (currentModalType === "expense") {
-      if (!g("m-label") || !g("m-amount")) return alert("Description and amount required.");
-      await addDoc(groupCol("expenses"), {
-        cat: g("m-cat"), city: g("m-city") || "—",
-        label: g("m-label"), amount: parseFloat(g("m-amount")), addedBy: currentUser.uid
-      });
-    }
-    closeModal();
-  } catch (e) {
-    alert("Error saving: " + e.message);
-  }
-});
-
-el("btn-add-booking").addEventListener("click",  () => openModal("booking"));
-el("btn-add-pack").addEventListener("click",     () => openModal("pack"));
-el("btn-add-activity").addEventListener("click", () => openModal("activity"));
-el("btn-add-expense").addEventListener("click",  () => openModal("expense"));
-
-// ── Modal base (used by invite and data modals) ──────────────
-const dataModal   = el("modal-bg");
-const inviteModal = el("modal-invite");
-inviteModal.addEventListener("click", e => { if (e.target === inviteModal) inviteModal.classList.remove("open"); });
