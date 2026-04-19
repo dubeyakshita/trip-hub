@@ -97,39 +97,50 @@ document.querySelectorAll(".group-tab").forEach(btn => {
 });
 
 // Create group
+// Hash a password using SHA-256 via Web Crypto API
+async function hashPassword(password) {
+  const msgBuffer = new TextEncoder().encode(password);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2,"0")).join("");
+}
+
 el("btn-create-group").addEventListener("click", async () => {
-  const name = el("g-trip-name").value.trim();
-  if (!name) return alert("Please enter a trip name.");
-  const inviteCode = randomCode();
-  // Create the group
+  const name     = el("g-trip-name").value.trim();
+  const password = el("g-trip-password").value.trim();
+  if (!name)     return alert("Please enter a trip name.");
+  if (password.length < 4) return alert("Password must be at least 4 characters.");
+  const passwordHash = await hashPassword(password);
   const gRef = await addDoc(collection(db,"groups"), {
-    name, inviteCode, members:[currentUser.uid],
+    name, passwordHash, members:[currentUser.uid],
     createdBy:currentUser.uid, createdAt:serverTimestamp()
   });
-  // Write invite code index — lets join lookup work without exposing all groups
-  await setDoc(doc(db,"inviteCodes",inviteCode), { groupId:gRef.id });
-  // Save member profile
   await setDoc(doc(db,"groups",gRef.id,"memberProfiles",currentUser.uid), {
     uid:currentUser.uid, displayName:currentUser.displayName||currentUser.email,
     photoURL:currentUser.photoURL||"", joinedAt:serverTimestamp()
   });
   localStorage.setItem("groupId_"+currentUser.uid, gRef.id);
-  currentGroup = { id:gRef.id, name, inviteCode, members:[currentUser.uid] };
+  currentGroup = { id:gRef.id, name, passwordHash, members:[currentUser.uid] };
   launchApp();
 });
 
-// Join group — uses inviteCodes index, never queries across all groups
+// Join group — hash the entered password, find matching group, join if correct
 el("btn-join-group").addEventListener("click", async () => {
-  const code = el("g-invite-code").value.trim().toUpperCase();
-  if (code.length !== 6) return alert("Enter a valid 6-character code.");
+  const name     = el("g-join-name").value.trim();
+  const password = el("g-join-password").value.trim();
+  if (!name)     return alert("Enter the exact trip name.");
+  if (!password) return alert("Enter the trip password.");
   try {
-    // Step 1: look up groupId from invite code index (no group data exposed)
-    const codeSnap = await getDoc(doc(db,"inviteCodes",code));
-    if (!codeSnap.exists()) return alert("No trip found with that code. Check with the trip creator.");
-    const groupId = codeSnap.data().groupId;
-    // Step 2: read group (update rule allows non-member to append themselves)
-    const gSnap = await getDoc(doc(db,"groups",groupId));
-    const gData = gSnap.data();
+    const passwordHash = await hashPassword(password);
+    // Query by trip name — user must know both name AND password
+    const q    = query(collection(db,"groups"), where("name","==",name));
+    const snap = await getDocs(q);
+    if (snap.empty) return alert("No trip found with that name.");
+    // Find the one whose passwordHash matches
+    const match = snap.docs.find(d => d.data().passwordHash === passwordHash);
+    if (!match) return alert("Incorrect password.");
+    const groupId = match.id;
+    const gData   = match.data();
     if (!gData.members.includes(currentUser.uid)) {
       await updateDoc(doc(db,"groups",groupId), { members:[...gData.members, currentUser.uid] });
       await setDoc(doc(db,"groups",groupId,"memberProfiles",currentUser.uid), {
@@ -159,6 +170,53 @@ el("menu-leave").addEventListener("click", async () => {
   unsubs.forEach(u=>u()); unsubs=[]; currentGroup=null;
   showGroupScreen();
 });
+
+// ── Seed ──────────────────────────────────────────────────────
+async function seedGroupData() {
+  const bookings = [
+    {type:"flight",    title:"Bengaluru → Berlin (Parents)", ref:"BLR-TXL-001",  date:"2025-06-05", status:"upcoming", location:"Kempegowda International Airport, Bengaluru", attachment:null},
+    {type:"hotel",     title:"Hotel Charlottenburg Berlin",  ref:"HTLCBLN",       date:"2025-06-05", status:"upcoming", location:"Kantstraße 111, 10627 Berlin", attachment:null},
+    {type:"flight",    title:"Berlin → Paris",               ref:"BER-CDG-22",    date:"2025-06-08", status:"upcoming", location:"Berlin Brandenburg Airport", attachment:null},
+    {type:"train",     title:"Paris → Amsterdam",            ref:"THA-PA-55",     date:"2025-06-11", status:"upcoming", location:"Paris Gare du Nord", attachment:null},
+    {type:"hotel",     title:"Le Marais Airbnb Paris",       ref:"AIRBNB-PM3",    date:"2025-06-08", status:"upcoming", location:"Le Marais, Paris, France", attachment:null},
+    {type:"experience",title:"Eiffel Tower summit tickets",  ref:"ET-TOP-44",     date:"2025-06-09", status:"upcoming", location:"Eiffel Tower, Paris", attachment:null},
+    {type:"experience",title:"Louvre Museum entry",          ref:"LV-ENT-99",     date:"2025-06-10", status:"upcoming", location:"Musée du Louvre, Paris", attachment:null},
+    {type:"hotel",     title:"Hotel Canal Amsterdam",        ref:"HAMS22",        date:"2025-06-11", status:"upcoming", location:"Amsterdam, Netherlands", attachment:null},
+    {type:"experience",title:"Anne Frank House",             ref:"AFH-88",        date:"2025-06-12", status:"upcoming", location:"Anne Frank House, Amsterdam", attachment:null},
+    {type:"flight",    title:"Amsterdam → Bengaluru (Parents)",ref:"AMS-BLR-RET",date:"2025-06-15", status:"upcoming", location:"Amsterdam Airport Schiphol", attachment:null},
+  ];
+  const packing = [
+    {cat:"Documents",  label:"Passports (all 4)",            done:false},
+    {cat:"Documents",  label:"Schengen visas (parents)",     done:false},
+    {cat:"Documents",  label:"Travel insurance docs",        done:false},
+    {cat:"Documents",  label:"Hotel & flight printouts",     done:false},
+    {cat:"Electronics",label:"Universal adapter (India→EU)", done:false},
+    {cat:"Electronics",label:"Power bank",                   done:false},
+    {cat:"Clothing",   label:"Warm jacket (for parents)",    done:false},
+    {cat:"Clothing",   label:"Rain jacket or umbrella",      done:false},
+    {cat:"Medicines",  label:"Motion sickness tablets",      done:false},
+    {cat:"Medicines",  label:"Parents' regular medicines",   done:false},
+    {cat:"Misc",       label:"Indian snacks for the flight", done:false},
+  ];
+  const activities = [
+    {city:"Berlin",    date:"2025-06-06", slot:"Morning",   label:"Brandenburg Gate walk",   location:"Brandenburg Gate, Berlin"},
+    {city:"Berlin",    date:"2025-06-06", slot:"Afternoon", label:"East Side Gallery",        location:"East Side Gallery, Berlin"},
+    {city:"Paris",     date:"2025-06-09", slot:"Morning",   label:"Eiffel Tower summit",      location:"Eiffel Tower, Paris"},
+    {city:"Paris",     date:"2025-06-09", slot:"Afternoon", label:"Seine river cruise",       location:"Bateaux Parisiens, Paris"},
+    {city:"Amsterdam", date:"2025-06-12", slot:"Morning",   label:"Anne Frank House",         location:"Anne Frank House, Amsterdam"},
+    {city:"Amsterdam", date:"2025-06-13", slot:"Afternoon", label:"Canal boat tour",          location:"Amsterdam Centraal, Amsterdam"},
+  ];
+  const expenses = [
+    {cat:"Transport",   city:"Berlin", label:"Train BER-CDG",    amount:280},
+    {cat:"Hotels",      city:"Paris",  label:"Airbnb 3 nights",  amount:420},
+    {cat:"Food",        city:"Paris",  label:"Dinner Montmartre", amount:95},
+    {cat:"Experiences", city:"Paris",  label:"Eiffel Tower x4",  amount:120},
+  ];
+  for (const b of bookings)   await addDoc(groupCol("bookings"),   b);
+  for (const p of packing)    await addDoc(groupCol("packing"),    p);
+  for (const a of activities) await addDoc(groupCol("activities"), a);
+  for (const e of expenses)   await addDoc(groupCol("expenses"),   e);
+}
 
 // ── Launch ────────────────────────────────────────────────────
 function launchApp() {
