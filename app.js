@@ -4,98 +4,95 @@ import { collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, setDoc, getD
 
 // ── State ────────────────────────────────────────────────────
 let currentUser  = null;
-let currentGroup = null;
+let currentGroup = null;  // { id, name, passwordHash, members, adminIds, budget }
 let unsubs       = [];
 let state = { bookings:[], packing:[], activities:[], expenses:[], photos:[], members:[] };
 
-const BUDGET = 4000;
-let bkFilter    = "all";
-let packFilter  = "all";
-let currentCity = "";
-let pendingDelete    = null;
-let editingBookingId = null;
-let editingPackId    = null;
-let editingActivityId= null;
-let editingExpenseId = null;
-let pendingAttachment= null;
-let currentBkType    = "flight";
+let bkFilter       = "all";
+let packFilter     = "all";
+let currentCity    = "";
+let pendingDelete  = null;
+let editingBookingId  = null;
+let editingPackId     = null;
+let editingActivityId = null;
+let editingExpenseId  = null;
+let pendingAttachments = [];  // array of { name, type, data }
+let currentBkType  = "flight";
 
 const typeIcons = { flight:"✈", train:"🚆", hotel:"🏨", experience:"🎭" };
 const catColors = { Transport:"#7b6ff0", Hotels:"#e8915a", Food:"#5bbf8a", Experiences:"#e07ab0", Shopping:"#e8c97e", Other:"#9b97a8" };
 
 // ── Helpers ──────────────────────────────────────────────────
-const el   = id => document.getElementById(id);
-const show = id => el(id).classList.remove("hidden");
-const hide = id => el(id).classList.add("hidden");
+const el    = id => document.getElementById(id);
+const show  = id => el(id).classList.remove("hidden");
+const hide  = id => el(id).classList.add("hidden");
 const groupCol  = name      => collection(db,"groups",currentGroup.id,name);
 const groupDoc  = (name,id) => doc(db,"groups",currentGroup.id,name,id);
 const mapsUrl   = loc => "https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(loc);
 const openModal = id  => el(id).classList.add("open");
 const closeModal= id  => el(id).classList.remove("open");
+const isAdmin   = ()  => currentGroup && (currentGroup.adminIds||[]).includes(currentUser?.uid);
+
 function initials(name){ return (name||"?").split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); }
 const avatarColors = ["av-0","av-1","av-2","av-3","av-4","av-5"];
 
-async function hashPassword(password) {
-  const buf  = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(password));
+function getBudget(){ return currentGroup?.budget || 0; }
+
+async function hashPassword(pw){
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pw));
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
 }
-
-function inviteLink() {
-  const base = window.location.href.split("?")[0];
-  return base + "?join=" + encodeURIComponent(currentGroup.name);
+function inviteLink(){
+  return window.location.href.split("?")[0]+"?join="+encodeURIComponent(currentGroup.name);
 }
 
-// ── URL: pre-fill join from invite link ──────────────────────
-function checkInviteUrl() {
-  const params = new URLSearchParams(window.location.search);
-  const joinName = params.get("join");
-  if (joinName) {
-    // Switch to Join tab and pre-fill name
+// ── URL invite pre-fill ──────────────────────────────────────
+function checkInviteUrl(){
+  const p = new URLSearchParams(window.location.search);
+  const j = p.get("join");
+  if (j){
     document.querySelectorAll(".group-tab").forEach(b=>b.classList.remove("active"));
     document.querySelector('[data-gtab="join"]').classList.add("active");
     hide("gtab-create"); show("gtab-join");
-    el("g-join-name").value = decodeURIComponent(joinName);
+    el("g-join-name").value = decodeURIComponent(j);
     show("join-prefill-banner");
-    // Clean URL without reload
-    window.history.replaceState({}, "", window.location.pathname);
+    window.history.replaceState({},""  ,window.location.pathname);
   }
 }
 
 // ── Auth ─────────────────────────────────────────────────────
 onAuthStateChanged(auth, async user => {
   hide("loader");
-  if (!user) { showAuthScreen(); return; }
+  if (!user){ showAuthScreen(); return; }
   currentUser = user;
   const groupId = localStorage.getItem("groupId_"+user.uid);
-  if (groupId) {
+  if (groupId){
     const gSnap = await getDoc(doc(db,"groups",groupId));
-    if (gSnap.exists() && gSnap.data().members.includes(user.uid)) {
+    if (gSnap.exists() && gSnap.data().members.includes(user.uid)){
       currentGroup = { id:gSnap.id, ...gSnap.data() };
       launchApp(); return;
     }
     localStorage.removeItem("groupId_"+user.uid);
   }
-  showGroupScreen(user);
+  showGroupScreen();
 });
 
-function showAuthScreen()  { hide("screen-app"); hide("screen-group"); show("screen-auth"); }
-function showGroupScreen() {
+function showAuthScreen(){ hide("screen-app"); hide("screen-group"); show("screen-auth"); }
+function showGroupScreen(){
   hide("screen-auth"); hide("screen-app"); show("screen-group");
   el("group-welcome").textContent = "Welcome, "+(currentUser.displayName||currentUser.email)+"!";
-  // Clear fields on show
   el("g-trip-name").value=""; el("g-trip-password").value="";
   el("g-join-name").value=""; el("g-join-password").value="";
   checkInviteUrl();
 }
 
-el("btn-google-signin").addEventListener("click", async () => {
-  try { await signInWithPopup(auth, provider); }
-  catch(e) { alert("Sign-in failed: "+e.message); }
+el("btn-google-signin").addEventListener("click", async ()=>{
+  try{ await signInWithPopup(auth,provider); }
+  catch(e){ alert("Sign-in failed: "+e.message); }
 });
 
-// Group tabs
-document.querySelectorAll(".group-tab").forEach(btn => {
-  btn.addEventListener("click", () => {
+document.querySelectorAll(".group-tab").forEach(btn=>{
+  btn.addEventListener("click",()=>{
     document.querySelectorAll(".group-tab").forEach(b=>b.classList.remove("active"));
     btn.classList.add("active");
     hide("gtab-create"); hide("gtab-join");
@@ -103,130 +100,201 @@ document.querySelectorAll(".group-tab").forEach(btn => {
   });
 });
 
-// Create group
-el("btn-create-group").addEventListener("click", async () => {
-  const name     = el("g-trip-name").value.trim();
-  const password = el("g-trip-password").value.trim();
-  if (!name)           return alert("Please enter a trip name.");
-  if (password.length < 4) return alert("Password must be at least 4 characters.");
-  const passwordHash = await hashPassword(password);
-  const gRef = await addDoc(collection(db,"groups"), {
-    name, passwordHash, members:[currentUser.uid],
-    createdBy:currentUser.uid, createdAt:serverTimestamp()
+// Create group — creator becomes first admin
+el("btn-create-group").addEventListener("click", async ()=>{
+  const name = el("g-trip-name").value.trim();
+  const pw   = el("g-trip-password").value.trim();
+  if (!name)        return alert("Please enter a trip name.");
+  if (pw.length<4)  return alert("Password must be at least 4 characters.");
+  const passwordHash = await hashPassword(pw);
+  const gRef = await addDoc(collection(db,"groups"),{
+    name, passwordHash,
+    members:[currentUser.uid],
+    adminIds:[currentUser.uid],   // creator = admin
+    budget:0,                      // configurable later
+    createdBy:currentUser.uid,
+    createdAt:serverTimestamp()
   });
-  await setDoc(doc(db,"groups",gRef.id,"memberProfiles",currentUser.uid), {
+  await setDoc(doc(db,"groups",gRef.id,"memberProfiles",currentUser.uid),{
     uid:currentUser.uid, displayName:currentUser.displayName||currentUser.email,
     photoURL:currentUser.photoURL||"", joinedAt:serverTimestamp()
   });
   localStorage.setItem("groupId_"+currentUser.uid, gRef.id);
-  currentGroup = { id:gRef.id, name, passwordHash, members:[currentUser.uid] };
-  // Clear fields
+  currentGroup = { id:gRef.id, name, passwordHash, members:[currentUser.uid], adminIds:[currentUser.uid], budget:0 };
   el("g-trip-name").value=""; el("g-trip-password").value="";
   launchApp();
 });
 
 // Join group
-el("btn-join-group").addEventListener("click", async () => {
-  const name     = el("g-join-name").value.trim();
-  const password = el("g-join-password").value.trim();
-  if (!name)     return alert("Enter the exact trip name.");
-  if (!password) return alert("Enter the trip password.");
-  try {
-    const passwordHash = await hashPassword(password);
-    const q    = query(collection(db,"groups"), where("name","==",name));
+el("btn-join-group").addEventListener("click", async ()=>{
+  const name = el("g-join-name").value.trim();
+  const pw   = el("g-join-password").value.trim();
+  if (!name) return alert("Enter the exact trip name.");
+  if (!pw)   return alert("Enter the trip password.");
+  try{
+    const passwordHash = await hashPassword(pw);
+    const q    = query(collection(db,"groups"),where("name","==",name));
     const snap = await getDocs(q);
     if (snap.empty) return alert("No trip found with that name.");
     const match = snap.docs.find(d=>d.data().passwordHash===passwordHash);
     if (!match) return alert("Incorrect password.");
     const groupId = match.id, gData = match.data();
-    if (!gData.members.includes(currentUser.uid)) {
-      await updateDoc(doc(db,"groups",groupId), { members:[...gData.members,currentUser.uid] });
-      await setDoc(doc(db,"groups",groupId,"memberProfiles",currentUser.uid), {
+    if (!gData.members.includes(currentUser.uid)){
+      await updateDoc(doc(db,"groups",groupId),{ members:[...gData.members,currentUser.uid] });
+      await setDoc(doc(db,"groups",groupId,"memberProfiles",currentUser.uid),{
         uid:currentUser.uid, displayName:currentUser.displayName||currentUser.email,
         photoURL:currentUser.photoURL||"", joinedAt:serverTimestamp()
       });
     }
     localStorage.setItem("groupId_"+currentUser.uid, groupId);
     currentGroup = { id:groupId, ...gData, members:[...gData.members,currentUser.uid] };
-    // Clear fields
     el("g-join-name").value=""; el("g-join-password").value="";
     launchApp();
-  } catch(e) { alert("Could not join: "+e.message); }
+  } catch(e){ alert("Could not join: "+e.message); }
 });
 
-async function doSignOut() {
+async function doSignOut(){
   unsubs.forEach(u=>u()); unsubs=[]; currentGroup=null;
   await signOut(auth);
 }
 el("btn-signout-group").addEventListener("click", doSignOut);
-el("menu-signout").addEventListener("click", ()=>{ hideMenu(); doSignOut(); });
+el("menu-signout").addEventListener("click",()=>{ hideMenu(); doSignOut(); });
 
 el("menu-leave").addEventListener("click", async ()=>{
   hideMenu();
   if (!confirm("Leave this trip?")) return;
   localStorage.removeItem("groupId_"+currentUser.uid);
   const newM = currentGroup.members.filter(m=>m!==currentUser.uid);
-  await updateDoc(doc(db,"groups",currentGroup.id), { members:newM });
+  const newA = (currentGroup.adminIds||[]).filter(a=>a!==currentUser.uid);
+  await updateDoc(doc(db,"groups",currentGroup.id),{ members:newM, adminIds:newA });
   unsubs.forEach(u=>u()); unsubs=[]; currentGroup=null;
   showGroupScreen();
 });
 
 // ── Launch ────────────────────────────────────────────────────
-function launchApp() {
+function launchApp(){
   hide("screen-auth"); hide("screen-group"); show("screen-app");
   el("app-trip-name").innerHTML = currentGroup.name+' <span>✈</span>';
   el("invite-link-display").textContent = inviteLink();
+  // Show settings only for admins
+  el("menu-settings").style.display = isAdmin() ? "block" : "none";
   subscribeAll();
 }
 
+// ── Real-time group updates (budget, adminIds) ────────────────
+function subscribeGroup(){
+  return onSnapshot(doc(db,"groups",currentGroup.id), snap=>{
+    if (!snap.exists()) return;
+    currentGroup = { id:snap.id, ...snap.data() };
+    el("menu-settings").style.display = isAdmin() ? "block" : "none";
+    renderExpenses(); // re-render with new budget
+  });
+}
+
 // ── Listeners ─────────────────────────────────────────────────
-function subscribeAll() {
+function subscribeAll(){
   unsubs.forEach(u=>u()); unsubs=[];
-  unsubs.push(onSnapshot(groupCol("bookings"), snap=>{
+  unsubs.push(subscribeGroup());
+  unsubs.push(onSnapshot(groupCol("bookings"),snap=>{
     state.bookings=snap.docs.map(d=>({id:d.id,...d.data()}));
     state.bookings.sort((a,b)=>a.date.localeCompare(b.date));
     renderBookings(); renderProgress();
   }));
-  unsubs.push(onSnapshot(groupCol("packing"), snap=>{
+  unsubs.push(onSnapshot(groupCol("packing"),snap=>{
     state.packing=snap.docs.map(d=>({id:d.id,...d.data()}));
     renderPacking();
   }));
-  unsubs.push(onSnapshot(groupCol("activities"), snap=>{
+  unsubs.push(onSnapshot(groupCol("activities"),snap=>{
     state.activities=snap.docs.map(d=>({id:d.id,...d.data()}));
     renderPlanner();
   }));
-  unsubs.push(onSnapshot(groupCol("expenses"), snap=>{
+  unsubs.push(onSnapshot(groupCol("expenses"),snap=>{
     state.expenses=snap.docs.map(d=>({id:d.id,...d.data()}));
     renderExpenses();
   }));
-  unsubs.push(onSnapshot(groupCol("photos"), snap=>{
+  unsubs.push(onSnapshot(groupCol("photos"),snap=>{
     state.photos=snap.docs.map(d=>({id:d.id,...d.data()}));
     renderPhotos();
   }));
-  unsubs.push(onSnapshot(groupCol("memberProfiles"), snap=>{
+  unsubs.push(onSnapshot(groupCol("memberProfiles"),snap=>{
     state.members=snap.docs.map(d=>d.data());
     renderMembers();
   }));
 }
 
 // ── Menu ─────────────────────────────────────────────────────
-el("btn-menu").addEventListener("click", e=>{ e.stopPropagation(); el("app-menu").classList.toggle("hidden"); });
-document.addEventListener("click", ()=>hideMenu());
+el("btn-menu").addEventListener("click",e=>{ e.stopPropagation(); el("app-menu").classList.toggle("hidden"); });
+document.addEventListener("click",()=>hideMenu());
 function hideMenu(){ el("app-menu").classList.add("hidden"); }
 
-el("menu-invite").addEventListener("click", ()=>{ hideMenu(); el("invite-link-display").textContent=inviteLink(); openModal("modal-invite"); });
-el("close-invite").addEventListener("click", ()=>closeModal("modal-invite"));
-el("modal-invite").addEventListener("click", e=>{ if(e.target===el("modal-invite")) closeModal("modal-invite"); });
-el("btn-copy-link").addEventListener("click", ()=>{
+el("menu-invite").addEventListener("click",()=>{ hideMenu(); el("invite-link-display").textContent=inviteLink(); openModal("modal-invite"); });
+el("close-invite").addEventListener("click",()=>closeModal("modal-invite"));
+el("modal-invite").addEventListener("click",e=>{ if(e.target===el("modal-invite")) closeModal("modal-invite"); });
+el("btn-copy-link").addEventListener("click",()=>{
   navigator.clipboard.writeText(inviteLink()).then(()=>{
     el("btn-copy-link").textContent="Copied!";
     setTimeout(()=>{ el("btn-copy-link").textContent="Copy link"; },2000);
   });
 });
 
+// ── Members modal ────────────────────────────────────────────
+el("menu-members").addEventListener("click",()=>{ hideMenu(); renderMembersModal(); openModal("modal-members"); });
+el("close-members").addEventListener("click",()=>closeModal("modal-members"));
+el("modal-members").addEventListener("click",e=>{ if(e.target===el("modal-members")) closeModal("modal-members"); });
+
+function renderMembersModal(){
+  const adminIds = currentGroup.adminIds||[];
+  const amAdmin  = isAdmin();
+  el("members-list").innerHTML = state.members.map((m,i)=>{
+    const isAd = adminIds.includes(m.uid);
+    const isMe = m.uid === currentUser.uid;
+    const canPromote = amAdmin && !isAd && !isMe;
+    const canDemote  = amAdmin && isAd && !isMe && adminIds.length > 1;
+    return `<div class="member-row">
+      <div class="avatar ${avatarColors[i%avatarColors.length]}">${initials(m.displayName)}</div>
+      <div class="member-info">
+        <div class="member-name">${m.displayName}${isMe?' <span style="color:var(--text3);font-size:11px">(you)</span>':""}</div>
+        <div class="member-role">${isAd?'<span class="badge-admin">Admin</span>':"Member"}</div>
+      </div>
+      <div style="display:flex;gap:6px">
+        ${canPromote?`<button class="btn-promote" onclick="promoteUser('${m.uid}')">Make admin</button>`:""}
+        ${canDemote ?`<button class="btn-demote"  onclick="demoteUser('${m.uid}')">Remove admin</button>`:""}
+      </div>
+    </div>`;
+  }).join("") || '<div class="no-data">No members yet</div>';
+}
+
+window.promoteUser = async function(uid){
+  const newAdmins = [...(currentGroup.adminIds||[]), uid];
+  await updateDoc(doc(db,"groups",currentGroup.id),{ adminIds:newAdmins });
+  renderMembersModal();
+};
+window.demoteUser = async function(uid){
+  const newAdmins = (currentGroup.adminIds||[]).filter(a=>a!==uid);
+  await updateDoc(doc(db,"groups",currentGroup.id),{ adminIds:newAdmins });
+  renderMembersModal();
+};
+
+// ── Settings modal (admin only) ──────────────────────────────
+el("menu-settings").addEventListener("click",()=>{
+  hideMenu();
+  if (!isAdmin()) return alert("Only admins can change trip settings.");
+  el("s-budget").value = currentGroup.budget||"";
+  openModal("modal-settings");
+});
+el("close-settings").addEventListener("click",()=>closeModal("modal-settings"));
+el("cancel-settings").addEventListener("click",()=>closeModal("modal-settings"));
+el("modal-settings").addEventListener("click",e=>{ if(e.target===el("modal-settings")) closeModal("modal-settings"); });
+el("save-settings").addEventListener("click", async ()=>{
+  if (!isAdmin()) return alert("Only admins can do this.");
+  const budget = parseFloat(el("s-budget").value)||0;
+  await updateDoc(doc(db,"groups",currentGroup.id),{ budget });
+  closeModal("modal-settings");
+});
+
 // ── Tab nav ───────────────────────────────────────────────────
 document.querySelectorAll(".tab-btn").forEach(btn=>{
-  btn.addEventListener("click", ()=>{
+  btn.addEventListener("click",()=>{
     document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
     document.querySelectorAll(".tab-section").forEach(s=>s.classList.remove("active"));
     btn.classList.add("active");
@@ -236,42 +304,60 @@ document.querySelectorAll(".tab-btn").forEach(btn=>{
 
 // ── Delete confirm ────────────────────────────────────────────
 function askDelete(col,id){ pendingDelete={col,id}; openModal("modal-delete"); }
-el("cancel-delete").addEventListener("click", ()=>{ pendingDelete=null; closeModal("modal-delete"); });
+el("cancel-delete").addEventListener("click",()=>{ pendingDelete=null; closeModal("modal-delete"); });
 el("confirm-delete").addEventListener("click", async ()=>{
   if (!pendingDelete) return;
   await deleteDoc(groupDoc(pendingDelete.col,pendingDelete.id));
   pendingDelete=null; closeModal("modal-delete");
 });
-el("modal-delete").addEventListener("click", e=>{ if(e.target===el("modal-delete")){ pendingDelete=null; closeModal("modal-delete"); }});
+el("modal-delete").addEventListener("click",e=>{ if(e.target===el("modal-delete")){ pendingDelete=null; closeModal("modal-delete"); }});
 window.askDelete = askDelete;
 
-// ── Attachment ────────────────────────────────────────────────
+// ── Multiple attachments ──────────────────────────────────────
 function fileToBase64(file){
   return new Promise((res,rej)=>{
-    if (file.size>1.2*1024*1024){ rej(new Error("File too large. Keep attachments under 1MB.")); return; }
+    if (file.size>1.2*1024*1024){ rej(new Error(`"${file.name}" is too large. Max 1MB per file.`)); return; }
     const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file);
   });
 }
+
+function renderAttachmentsPreview(){
+  const wrap = el("b-attachments-preview");
+  wrap.innerHTML = pendingAttachments.map((a,i)=>`
+    <div class="att-pill">
+      <span class="att-name" onclick="previewPendingAtt(${i})">📎 ${a.name}</span>
+      <span class="att-remove" onclick="removeAtt(${i})">✕</span>
+    </div>`).join("");
+}
+
+window.removeAtt = function(i){
+  pendingAttachments.splice(i,1);
+  renderAttachmentsPreview();
+};
+window.previewPendingAtt = function(i){
+  viewAttachment(pendingAttachments[i]);
+};
+
 el("b-file").addEventListener("change", async function(){
-  const file=this.files[0]; if(!file) return;
-  try {
-    const data=await fileToBase64(file);
-    pendingAttachment={name:file.name,type:file.type,data};
-    el("b-file-preview").classList.remove("hidden");
-    el("b-file-preview").innerHTML=`<span>📎</span><span class="file-name">${file.name}</span><span class="file-clear" id="clear-file">✕</span>`;
-    el("clear-file").addEventListener("click",()=>{
-      pendingAttachment=null; el("b-file-preview").classList.add("hidden");
-      el("b-file-preview").innerHTML=""; el("b-file").value="";
-    });
-  } catch(e){ alert(e.message); this.value=""; }
+  const files = Array.from(this.files);
+  const remaining = 5 - pendingAttachments.length;
+  if (files.length > remaining) return alert(`You can attach up to 5 files. You have space for ${remaining} more.`);
+  for (const file of files){
+    try{
+      const data = await fileToBase64(file);
+      pendingAttachments.push({ name:file.name, type:file.type, data });
+    } catch(e){ alert(e.message); }
+  }
+  renderAttachmentsPreview();
+  this.value="";
 });
 
 function viewAttachment(att){
-  el("pdf-title").textContent=att.name||"Attachment";
-  const c=el("pdf-container");
-  c.innerHTML=att.type==="application/pdf"
-    ?`<iframe src="${att.data}" style="width:100%;height:55vh;border:none;border-radius:var(--radius-sm)"></iframe>`
-    :`<img src="${att.data}" style="width:100%;border-radius:var(--radius-sm)">`;
+  el("pdf-title").textContent = att.name||"Attachment";
+  const c = el("pdf-container");
+  c.innerHTML = att.type==="application/pdf"
+    ? `<iframe src="${att.data}" style="width:100%;height:55vh;border:none;border-radius:var(--radius-sm)"></iframe>`
+    : `<img src="${att.data}" style="width:100%;border-radius:var(--radius-sm)">`;
   el("btn-download-pdf").onclick=()=>{ const a=document.createElement("a"); a.href=att.data; a.download=att.name; a.click(); };
   openModal("modal-pdf");
 }
@@ -281,12 +367,10 @@ el("modal-pdf").addEventListener("click",e=>{ if(e.target===el("modal-pdf")){ el
 // ── Booking type selector ────────────────────────────────────
 function setBookingType(type){
   currentBkType=type;
-  document.querySelectorAll(".type-btn").forEach(b=>{
-    b.classList.toggle("active", b.dataset.type===type);
-  });
+  document.querySelectorAll(".type-btn").forEach(b=>b.classList.toggle("active",b.dataset.type===type));
   const isRoute = type==="flight"||type==="train";
-  el("bk-route-fields").style.display    = isRoute?"block":"none";
-  el("bk-location-field").style.display  = isRoute?"none":"block";
+  el("bk-route-fields").style.display   = isRoute?"block":"none";
+  el("bk-location-field").style.display = isRoute?"none":"block";
   el("b-from-label").textContent = type==="flight"?"Departure airport":"Departure station";
   el("b-to-label").textContent   = type==="flight"?"Arrival airport":"Arrival station";
 }
@@ -296,22 +380,25 @@ document.querySelectorAll(".type-btn").forEach(btn=>{
 
 // ── BOOKINGS ─────────────────────────────────────────────────
 function renderBookings(){
-  const list=el("bk-list");
-  const filtered=bkFilter==="all"?state.bookings:state.bookings.filter(b=>b.type===bkFilter);
+  const list = el("bk-list");
+  const filtered = bkFilter==="all"?state.bookings:state.bookings.filter(b=>b.type===bkFilter);
   if (!filtered.length){ list.innerHTML='<div class="no-data">No bookings yet</div>'; return; }
-  list.innerHTML=filtered.map(b=>{
-    const timeStr = b.time ? ` · ${b.time}` : "";
-    const routeHtml = (b.type==="flight"||b.type==="train") && (b.from||b.to)
-      ? `<div style="font-size:12px;color:var(--text2);margin-top:3px">📍 ${b.from||"?"} → ${b.to||"?"}</div>` : "";
-    const locHtml = b.location
-      ? `<a class="location-link" href="${mapsUrl(b.location)}" target="_blank">📍 ${b.location}</a>` : "";
-    const attHtml = b.attachment
-      ? `<span class="attachment-btn" onclick="viewBkAtt('${b.id}')">📎 ${b.attachment.name}</span>` : "";
+  list.innerHTML = filtered.map(b=>{
+    const timeStr   = b.time?` · ${b.time}`:"";
+    const routeHtml = (b.type==="flight"||b.type==="train")&&(b.from||b.to)
+      ?`<div style="font-size:12px;color:var(--text2);margin-top:3px">📍 ${b.from||"?"} → ${b.to||"?"}</div>`:"";
+    const locHtml   = b.location
+      ?`<a class="location-link" href="${mapsUrl(b.location)}" target="_blank">📍 ${b.location}</a>`:"";
+    const atts = b.attachments||[];
+    const attHtml = atts.length
+      ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">${atts.map((a,i)=>
+          `<span class="attachment-btn" onclick="viewBkAtt('${b.id}',${i})">📎 ${a.name}</span>`
+        ).join("")}</div>` : "";
     return `<div class="bk-card ${b.type}">
       <span class="bk-icon">${typeIcons[b.type]||"📌"}</span>
       <div class="bk-body">
         <div class="bk-title">${b.title}</div>
-        <div class="bk-meta">${b.date}${timeStr} &nbsp;·&nbsp; <span style="font-family:monospace;font-size:11px">${b.ref}</span></div>
+        <div class="bk-meta">${b.date}${timeStr} · <span style="font-family:monospace;font-size:11px">${b.ref}</span></div>
         ${routeHtml}${locHtml}${attHtml}
         <div class="item-actions">
           <button class="toggle-btn" onclick="cycleStatus('${b.id}','${b.status}')">${b.status} →</button>
@@ -328,31 +415,26 @@ window.cycleStatus = async function(id,status){
   const cycle=["upcoming","today","done","cancelled"];
   await updateDoc(groupDoc("bookings",id),{status:cycle[(cycle.indexOf(status)+1)%cycle.length]});
 };
-window.viewBkAtt = function(id){
-  const b=state.bookings.find(x=>x.id===id); if(b&&b.attachment) viewAttachment(b.attachment);
+window.viewBkAtt = function(id,i){
+  const b=state.bookings.find(x=>x.id===id);
+  if (b&&b.attachments&&b.attachments[i]) viewAttachment(b.attachments[i]);
 };
 
 function openBookingModal(bk=null){
-  editingBookingId=bk?bk.id:null;
-  pendingAttachment=bk&&bk.attachment?bk.attachment:null;
-  el("modal-booking-title").textContent=bk?"Edit booking":"Add booking";
-  const type=bk?bk.type:"flight";
+  editingBookingId = bk?bk.id:null;
+  pendingAttachments = bk&&bk.attachments ? [...bk.attachments] : [];
+  el("modal-booking-title").textContent = bk?"Edit booking":"Add booking";
+  const type = bk?bk.type:"flight";
   setBookingType(type);
-  el("b-title").value   =bk?bk.title:"";
-  el("b-ref").value     =bk?bk.ref:"";
-  el("b-date").value    =bk?bk.date:"";
-  el("b-time").value    =bk?(bk.time||""):"";
-  el("b-from").value    =bk?(bk.from||""):"";
-  el("b-to").value      =bk?(bk.to||""):"";
-  el("b-location").value=bk?(bk.location||""):"";
-  el("b-file").value="";
-  if (pendingAttachment){
-    el("b-file-preview").classList.remove("hidden");
-    el("b-file-preview").innerHTML=`<span>📎</span><span class="file-name">${pendingAttachment.name}</span><span class="file-clear" id="clear-file">✕</span>`;
-    el("clear-file").addEventListener("click",()=>{ pendingAttachment=null; el("b-file-preview").classList.add("hidden"); el("b-file-preview").innerHTML=""; el("b-file").value=""; });
-  } else {
-    el("b-file-preview").classList.add("hidden"); el("b-file-preview").innerHTML="";
-  }
+  el("b-title").value    = bk?bk.title:"";
+  el("b-ref").value      = bk?bk.ref:"";
+  el("b-date").value     = bk?bk.date:"";
+  el("b-time").value     = bk?(bk.time||""):"";
+  el("b-from").value     = bk?(bk.from||""):"";
+  el("b-to").value       = bk?(bk.to||""):"";
+  el("b-location").value = bk?(bk.location||""):"";
+  el("b-file").value     = "";
+  renderAttachmentsPreview();
   openModal("modal-booking");
 }
 window.editBooking = id=>openBookingModal(state.bookings.find(b=>b.id===id));
@@ -364,16 +446,17 @@ el("modal-booking").addEventListener("click",e=>{ if(e.target===el("modal-bookin
 el("save-booking").addEventListener("click", async ()=>{
   const title=el("b-title").value.trim(), date=el("b-date").value;
   if (!title||!date) return alert("Title and date are required.");
-  const isRoute=currentBkType==="flight"||currentBkType==="train";
-  const data={
+  const isRoute = currentBkType==="flight"||currentBkType==="train";
+  const data = {
     type:currentBkType, title, ref:el("b-ref").value.trim()||"—", date,
     time:el("b-time").value||"",
     from:isRoute?el("b-from").value.trim():"",
-    to:isRoute?el("b-to").value.trim():"",
+    to:  isRoute?el("b-to").value.trim():"",
     location:isRoute?"":el("b-location").value.trim(),
-    attachment:pendingAttachment||null, addedBy:currentUser.uid
+    attachments:[...pendingAttachments],
+    addedBy:currentUser.uid
   };
-  try {
+  try{
     if (editingBookingId){ await updateDoc(groupDoc("bookings",editingBookingId),data); }
     else { data.status="upcoming"; await addDoc(groupCol("bookings"),data); }
     closeModal("modal-booking");
@@ -514,12 +597,20 @@ el("save-activity").addEventListener("click", async ()=>{
 
 // ── EXPENSES ─────────────────────────────────────────────────
 function renderExpenses(){
-  const total=state.expenses.reduce((s,e)=>s+(e.amount||0),0);
+  const total  = state.expenses.reduce((s,e)=>s+(e.amount||0),0);
+  const budget = getBudget();
+  const budgetSet = budget > 0;
   el("exp-metrics").innerHTML=`
     <div class="metric"><div class="metric-val">€${total.toLocaleString()}</div><div class="metric-lbl">Total spent</div></div>
-    <div class="metric"><div class="metric-val">€${Math.round(total/(state.members.length||4)).toLocaleString()}</div><div class="metric-lbl">Per person</div></div>
-    <div class="metric"><div class="metric-val">€${(BUDGET-total).toLocaleString()}</div><div class="metric-lbl">Budget left</div></div>
-    <div class="metric"><div class="metric-val">${Math.round(total/BUDGET*100)}%</div><div class="metric-lbl">Of budget</div></div>`;
+    <div class="metric"><div class="metric-val">€${Math.round(total/(state.members.length||1)).toLocaleString()}</div><div class="metric-lbl">Per person</div></div>
+    <div class="metric ${!budgetSet?"metric-unset":""}">
+      <div class="metric-val">${budgetSet?"€"+(budget-total).toLocaleString():'<span style="font-size:14px;color:var(--text3)">Not set</span>'}</div>
+      <div class="metric-lbl">Budget left ${isAdmin()?'<span onclick="openBudgetSettings()" style="cursor:pointer;color:var(--accent);font-size:11px">✏️</span>':""}</div>
+    </div>
+    <div class="metric">
+      <div class="metric-val">${budgetSet?Math.round(total/budget*100)+"%":'—'}</div>
+      <div class="metric-lbl">Of budget</div>
+    </div>`;
   const byCat={};
   state.expenses.forEach(e=>{ byCat[e.cat]=(byCat[e.cat]||0)+(e.amount||0); });
   const maxVal=Math.max(...Object.values(byCat),1);
@@ -542,6 +633,12 @@ function renderExpenses(){
     </div>`).join(""):'<div class="no-data">No expenses yet</div>';
 }
 
+window.openBudgetSettings = function(){
+  if (!isAdmin()) return;
+  el("s-budget").value = currentGroup.budget||"";
+  openModal("modal-settings");
+};
+
 function openExpenseModal(e=null){
   editingExpenseId=e?e.id:null;
   el("modal-expense-title").textContent=e?"Edit expense":"Add expense";
@@ -563,7 +660,7 @@ el("save-expense").addEventListener("click", async ()=>{
   closeModal("modal-expense");
 });
 
-// ── MEMBERS ──────────────────────────────────────────────────
+// ── MEMBERS (header avatars) ──────────────────────────────────
 function renderMembers(){
   el("app-avatars").innerHTML=state.members.slice(0,5).map((m,i)=>
     `<div class="avatar ${avatarColors[i%avatarColors.length]}" title="${m.displayName}">${initials(m.displayName)}</div>`
@@ -606,7 +703,7 @@ el("photo-input").addEventListener("change", async function(){
   const label=document.querySelector("label.photo-label");
   if (label) label.childNodes[0].textContent="Saving…";
   for (const file of this.files){
-    try {
+    try{
       const base64=await compressToBase64(file);
       await addDoc(groupCol("photos"),{url:base64,label:file.name.replace(/\.[^.]+$/,""),uploadedBy:currentUser.uid,at:serverTimestamp()});
     } catch(e){ alert("Could not save photo: "+e.message); }

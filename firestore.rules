@@ -1,15 +1,22 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
+
     match /groups/{groupId} {
       allow read: if request.auth != null;
+
       allow create: if request.auth != null
                     && request.resource.data.members.hasAll([request.auth.uid])
                     && request.resource.data.members.size() == 1;
+
+      // Members can join (append themselves).
+      // Admins can update budget and adminIds.
+      // Anyone who is a member can update members list to add themselves (already a member check handled by join logic).
       allow update: if request.auth != null
                     && (
-                      request.auth.uid in resource.data.members
-                      || (
+                      // New member joining via password
+                      (
                         request.resource.data.members.hasAll(resource.data.members)
                         && request.resource.data.members.size() == resource.data.members.size() + 1
                         && request.resource.data.members.hasAll([request.auth.uid])
@@ -17,16 +24,39 @@ service cloud.firestore {
                         && request.resource.data.name == resource.data.name
                         && request.resource.data.createdBy == resource.data.createdBy
                       )
+                      ||
+                      // Existing member making changes
+                      (
+                        request.auth.uid in resource.data.members
+                        && (
+                          // Admin-only: changing budget or adminIds
+                          (
+                            (request.resource.data.budget != resource.data.budget
+                             || request.resource.data.adminIds != resource.data.adminIds)
+                            && request.auth.uid in resource.data.adminIds
+                          )
+                          ||
+                          // Any member: other changes (e.g. leaving)
+                          (
+                            request.resource.data.budget == resource.data.budget
+                            && request.resource.data.adminIds == resource.data.adminIds
+                          )
+                        )
+                      )
                     );
+
       allow delete: if false;
+
       match /{subcollection}/{docId} {
         allow read, write: if request.auth != null
                            && isGroupMember(groupId);
       }
     }
+
     match /_meta/{docId} {
       allow read, write: if request.auth != null;
     }
+
     function isGroupMember(groupId) {
       return request.auth.uid in
         get(/databases/$(database)/documents/groups/$(groupId)).data.members;
